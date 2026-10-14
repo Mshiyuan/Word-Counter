@@ -10,6 +10,7 @@ $(() => {
   const BUTTON_NAME = '输入计数';
   const LS_ENABLED = `${SCRIPT_ID}:enabled`;
   const LS_POS = `${SCRIPT_ID}:pos`;
+  const LS_COLLAPSED = `${SCRIPT_ID}:collapsed`;
   const BADGE_ID = `${SCRIPT_ID}-badge`;
   const STYLE_ID = `${SCRIPT_ID}-style`;
   const MES_CLASS = `${SCRIPT_ID}-mes`;
@@ -68,31 +69,88 @@ $(() => {
     const style = mainDoc.createElement('style');
     style.id = STYLE_ID;
     style.textContent = `
+      /* 输入框标签：外层只管定位/拖动/按压，里面是"胶囊"和"球"两层，叠在同一个位置互相切换。
+         动画只用 transform + opacity；展开带回弹，收起干脆利落。 */
       #${BADGE_ID} {
         position: fixed;
         z-index: 3000;
-        display: flex;
-        gap: 8px;
-        align-items: center;
-        padding: 3px 9px;
-        border-radius: 10px;
+        height: 24px;
         font-size: 12px;
         line-height: 18px;
         font-family: var(--mainFontFamily, inherit);
         color: var(--SmartThemeBodyColor, #ddd);
-        background: var(--SmartThemeBlurTintColor, rgba(0, 0, 0, 0.55));
-        border: 1px solid var(--SmartThemeBorderColor, rgba(255, 255, 255, 0.15));
-        backdrop-filter: blur(var(--SmartThemeBlurStrength, 6px));
-        opacity: 0.85;
         cursor: grab;
         touch-action: none;
         user-select: none;
         -webkit-user-select: none;
+        -webkit-tap-highlight-color: transparent;
         white-space: nowrap;
         font-variant-numeric: tabular-nums;
+        transition: transform 140ms ease-out;
       }
-      #${BADGE_ID}.ic-dragging { cursor: grabbing; opacity: 1; }
+      #${BADGE_ID}.ic-pressed { transform: scale(0.92); }
+      #${BADGE_ID}.ic-dragging { cursor: grabbing; transform: scale(1.04); }
       #${BADGE_ID}[hidden] { display: none; }
+      #${BADGE_ID} .ic-panel,
+      #${BADGE_ID} .ic-ball {
+        box-sizing: border-box;
+        height: 24px;
+        background: var(--SmartThemeBlurTintColor, rgba(0, 0, 0, 0.55));
+        border: 1px solid var(--SmartThemeBorderColor, rgba(255, 255, 255, 0.15));
+        backdrop-filter: blur(var(--SmartThemeBlurStrength, 6px));
+        -webkit-backdrop-filter: blur(var(--SmartThemeBlurStrength, 6px));
+        will-change: transform, opacity;
+      }
+      #${BADGE_ID} .ic-panel {
+        display: flex;
+        gap: 8px;
+        align-items: center;
+        padding: 2px 9px;
+        border-radius: 12px;
+        transform-origin: calc(100% - 12px) 50%;
+        transform: scale(1);
+        opacity: 0.88;
+        transition: transform 420ms cubic-bezier(0.68, -0.6, 0.32, 1.6), opacity 180ms ease-out;
+      }
+      #${BADGE_ID} .ic-ball {
+        position: absolute;
+        top: 0;
+        right: 0;
+        width: 24px;
+        border-radius: 50%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        transform: scale(0.3);
+        opacity: 0;
+        pointer-events: none;
+        transition: transform 200ms cubic-bezier(0.4, 0, 0.2, 1), opacity 140ms ease-in;
+      }
+      #${BADGE_ID} .ic-ball::after {
+        content: '';
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        background: var(--SmartThemeQuoteColor, #e18a24);
+        opacity: 0.85;
+      }
+      /* 收起：胶囊往右侧的球心缩没，球弹出来 */
+      #${BADGE_ID}.ic-collapsed .ic-panel {
+        position: absolute;
+        top: 0;
+        right: 0;
+        transform: scale(0.12);
+        opacity: 0;
+        pointer-events: none;
+        transition: transform 220ms cubic-bezier(0.4, 0, 0.2, 1), opacity 160ms ease-in;
+      }
+      #${BADGE_ID}.ic-collapsed .ic-ball {
+        position: static;
+        transform: scale(1);
+        opacity: 0.88;
+        pointer-events: auto;
+        transition: transform 420ms cubic-bezier(0.68, -0.6, 0.32, 1.6), opacity 180ms ease-out;
+      }
       #${BADGE_ID} .ic-pending { opacity: 0.5; }
       /* 楼层计数：和输入框标签同一套横排胶囊样式，缩小一号，靠右放在正文下面 */
       .${MES_CLASS} {
@@ -131,16 +189,18 @@ $(() => {
     if (!badge) {
       badge = mainDoc.createElement('div');
       badge.id = BADGE_ID;
-      badge.innerHTML = '<span class="ic-tokens">Token 0</span><span class="ic-words">字数 0</span>';
+      badge.innerHTML = '<div class="ic-panel"><span class="ic-tokens">Token 0</span><span class="ic-words">字数 0</span></div><div class="ic-ball"></div>';
+      badge.classList.toggle('ic-collapsed', collapsed);
       mainDoc.body.appendChild(badge);
       bindDrag(badge);
     }
     return badge;
   }
 
-  // 拖过就记住位置（按视口比例存，横竖屏切换也不会跑出屏幕）；双击/双击触摸恢复默认位置
+  // 拖过就记住位置（按视口比例存，横竖屏切换也不会跑出屏幕）；长按恢复默认位置
   const loadPos = () => { try { return JSON.parse(lsGet(LS_POS) || 'null'); } catch (e) { return null; } };
   let savedPos = loadPos();
+  let collapsed = lsGet(LS_COLLAPSED) === '1';
 
   function clampToViewport(badge, left, top) {
     const bw = badge.offsetWidth;
@@ -149,6 +209,12 @@ $(() => {
       left: Math.max(2, Math.min(left, mainWin.innerWidth - bw - 2)),
       top: Math.max(2, Math.min(top, mainWin.innerHeight - bh - 2)),
     };
+  }
+
+  function savePosFrom(badge) {
+    const rect = badge.getBoundingClientRect();
+    savedPos = { x: rect.left / mainWin.innerWidth, y: rect.top / mainWin.innerHeight };
+    lsSet(LS_POS, JSON.stringify(savedPos));
   }
 
   function positionBadge() {
@@ -171,20 +237,48 @@ $(() => {
     badge.style.top = `${p.top}px`;
   }
 
+  // 点一下在"胶囊"和"球"之间切换。球固定在胶囊右端，切换时保持右边缘不动，看起来就是原地缩放。
+  function toggleCollapsed(badge) {
+    const before = badge.offsetLeft + badge.offsetWidth;
+    collapsed = !collapsed;
+    lsSet(LS_COLLAPSED, collapsed ? '1' : '0');
+    badge.classList.toggle('ic-collapsed', collapsed);
+    if (savedPos) {
+      badge.style.left = `${badge.offsetLeft + before - (badge.offsetLeft + badge.offsetWidth)}px`;
+      const p = clampToViewport(badge, badge.offsetLeft, badge.offsetTop);
+      badge.style.left = `${p.left}px`;
+      savePosFrom(badge);
+    }
+    positionBadge();
+  }
+
   function bindDrag(badge) {
     let start = null;
-    let lastTap = 0;
+    let pressTimer = null;
     badge.addEventListener('pointerdown', (e) => {
       if (e.button !== undefined && e.button !== 0) return;
       const rect = badge.getBoundingClientRect();
-      start = { id: e.pointerId, dx: e.clientX - rect.left, dy: e.clientY - rect.top, x: e.clientX, y: e.clientY, moved: false };
+      start = { id: e.pointerId, dx: e.clientX - rect.left, dy: e.clientY - rect.top, x: e.clientX, y: e.clientY, moved: false, longPressed: false };
       try { badge.setPointerCapture(e.pointerId); } catch (err) {}
+      badge.classList.add('ic-pressed');
+      clearTimeout(pressTimer);
+      pressTimer = setTimeout(() => {
+        if (!start || start.moved) return;
+        start.longPressed = true;
+        badge.classList.remove('ic-pressed');
+        savedPos = null;
+        lsDel(LS_POS);
+        positionBadge();
+        if (typeof toastr !== 'undefined') toastr.info('计数标签已回到默认位置', '', { timeOut: 1200 });
+      }, 650);
       e.preventDefault();
     });
     badge.addEventListener('pointermove', (e) => {
-      if (!start || e.pointerId !== start.id) return;
-      if (!start.moved && Math.hypot(e.clientX - start.x, e.clientY - start.y) < 4) return;
+      if (!start || e.pointerId !== start.id || start.longPressed) return;
+      if (!start.moved && Math.hypot(e.clientX - start.x, e.clientY - start.y) < 5) return;
       start.moved = true;
+      clearTimeout(pressTimer);
+      badge.classList.remove('ic-pressed');
       badge.classList.add('ic-dragging');
       const p = clampToViewport(badge, e.clientX - start.dx, e.clientY - start.dy);
       badge.style.left = `${p.left}px`;
@@ -192,21 +286,11 @@ $(() => {
     });
     const end = (e) => {
       if (!start || e.pointerId !== start.id) return;
+      clearTimeout(pressTimer);
       try { badge.releasePointerCapture(e.pointerId); } catch (err) {}
-      if (start.moved) {
-        const rect = badge.getBoundingClientRect();
-        savedPos = { x: rect.left / mainWin.innerWidth, y: rect.top / mainWin.innerHeight };
-        lsSet(LS_POS, JSON.stringify(savedPos));
-      } else {
-        const now = Date.now();
-        if (now - lastTap < 350) {
-          savedPos = null;
-          lsDel(LS_POS);
-          if (typeof toastr !== 'undefined') toastr.info('计数标签已回到默认位置', '', { timeOut: 1200 });
-        }
-        lastTap = now;
-      }
-      badge.classList.remove('ic-dragging');
+      badge.classList.remove('ic-pressed', 'ic-dragging');
+      if (start.moved) savePosFrom(badge);
+      else if (!start.longPressed && e.type === 'pointerup') toggleCollapsed(badge);
       start = null;
       positionBadge();
     };
@@ -230,7 +314,7 @@ $(() => {
     const badge = getBadge();
     const w = countWords(text);
     badge.querySelector('.ic-words').textContent = `字数 ${w.words}`;
-    badge.title = `字数 ${w.words}｜字符 ${w.chars}（不含空白 ${w.charsNoSpace}）\n拖动可移动，双击回到默认位置`;
+    badge.title = `字数 ${w.words}｜字符 ${w.chars}（不含空白 ${w.charsNoSpace}）\n点击收起/展开，拖动可移动，长按回到默认位置`;
 
     // 字数是即时的；token 要调分词器（可能走后端），防抖后再算，期间先把旧数字变淡
     const tokEl = badge.querySelector('.ic-tokens');
