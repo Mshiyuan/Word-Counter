@@ -241,9 +241,10 @@ $(() => {
       /* 楼层计数开启时，把酒馆自带的（过往楼层常是 0 的）token 显示藏起来，避免两个数打架 */
       body.${MES_ON_CLASS} #chat .mes .tokenCounterDisplay { display: none !important; }
 
-      /* ---------- 设置浮窗 ---------- */
-      /* ST 里 position: fixed 的层级会被压在聊天区后面；照书摘的做法，absolute 贴 body 铺满 + 超高 z-index
-         （ST 的 body 本身不滚动，absolute 贴 body 视觉上等于固定） */
+      /* ---------- 设置浮窗 ----------
+         ST 里 position: fixed 的层级会被压在聊天区后面；照书摘的做法，absolute 贴 body 铺满 + 超高 z-index
+         （ST 的 body 本身不滚动，absolute 贴 body 视觉上等于固定）。
+         浮窗背景单独一层（.ic-bg），内容变多变少时只对背景做 translateY + scaleY 的弹簧过渡，内容只做位移，全程不过渡 height。 */
       #${SETTINGS_ID} {
         position: absolute;
         top: 0;
@@ -260,6 +261,8 @@ $(() => {
         font-family: var(--mainFontFamily, inherit);
         color: var(--SmartThemeBodyColor, #ddd);
         -webkit-tap-highlight-color: transparent;
+        user-select: none;
+        -webkit-user-select: none;
       }
       #${SETTINGS_ID}[hidden] { display: none; }
       #${SETTINGS_ID} .ic-mask {
@@ -271,26 +274,36 @@ $(() => {
       }
       #${SETTINGS_ID} .ic-sheet {
         position: relative;
+        isolation: isolate;
         width: min(360px, 100%);
-        max-height: calc(100% - 32px);
-        overflow-y: auto;
-        box-sizing: border-box;
-        padding: 16px 18px 18px;
-        border-radius: 18px;
+        transform: translateY(16px) scale(0.94);
+        opacity: 0;
+        transition: transform 180ms cubic-bezier(0.4, 0, 1, 1), opacity 150ms ease-in;
+        will-change: transform, opacity;
+      }
+      #${SETTINGS_ID} .ic-bg {
+        position: absolute;
+        inset: 0;
+        z-index: -1;
+        border-radius: 20px;
         background: var(--SmartThemeBlurTintColor, rgba(28, 28, 32, 0.92));
         border: 1px solid var(--SmartThemeBorderColor, rgba(255, 255, 255, 0.12));
         backdrop-filter: blur(calc(var(--SmartThemeBlurStrength, 10px) + 6px));
         -webkit-backdrop-filter: blur(calc(var(--SmartThemeBlurStrength, 10px) + 6px));
         box-shadow: 0 18px 50px rgba(0, 0, 0, 0.4);
+        transform-origin: 50% 0;
+        will-change: transform;
+      }
+      #${SETTINGS_ID} .ic-body {
+        max-height: calc(100dvh - 32px);
+        overflow-y: auto;
+        box-sizing: border-box;
+        padding: 18px 18px 20px;
         display: flex;
         flex-direction: column;
-        gap: 14px;
+        gap: 18px;
         font-size: 14px;
         line-height: 1.5;
-        transform: translateY(16px) scale(0.94);
-        opacity: 0;
-        transition: transform 180ms cubic-bezier(0.4, 0, 1, 1), opacity 150ms ease-in;
-        will-change: transform, opacity;
       }
       #${SETTINGS_ID}.ic-open .ic-mask { opacity: 1; transition: opacity 220ms ease-out; }
       #${SETTINGS_ID}.ic-open .ic-sheet {
@@ -298,49 +311,72 @@ $(() => {
         opacity: 1;
         transition: transform 720ms ${SPRING_SOFT}, opacity 200ms ease-out;
       }
-      #${SETTINGS_ID} .ic-head { display: flex; align-items: center; justify-content: space-between; }
-      #${SETTINGS_ID} .ic-head b { font-size: 16px; }
-      #${SETTINGS_ID} .ic-group { display: flex; flex-direction: column; gap: 8px; }
-      #${SETTINGS_ID} .ic-group[hidden] { display: none; }
-      #${SETTINGS_ID} .ic-title { font-size: 12px; opacity: 0.6; letter-spacing: 0.04em; }
-      #${SETTINGS_ID} .ic-note { margin: 0; font-size: 12.5px; opacity: 0.7; }
-      #${SETTINGS_ID} .ic-note[hidden] { display: none; }
       #${SETTINGS_ID} button { font: inherit; color: inherit; cursor: pointer; -webkit-tap-highlight-color: transparent; }
+
+      /* 标题栏 */
+      #${SETTINGS_ID} .ic-head { display: flex; align-items: center; justify-content: space-between; }
+      #${SETTINGS_ID} .ic-head b { font-size: 17px; font-weight: 600; }
       #${SETTINGS_ID} .ic-x {
-        width: 30px; height: 30px; border-radius: 50%; border: 0; background: rgba(127, 127, 127, 0.18); font-size: 18px; line-height: 1;
-        transition: transform 380ms ${EASE_BACK};
+        width: 30px; height: 30px; border-radius: 50%; border: 0; padding: 0; background: rgba(127, 127, 127, 0.16); font-size: 17px; line-height: 30px;
+        transition: transform 420ms ${SPRING_SOFT};
       }
-      #${SETTINGS_ID} .ic-seg { position: relative; display: grid; grid-template-columns: 1fr 1fr; padding: 3px; border-radius: 12px; background: rgba(127, 127, 127, 0.16); }
+
+      /* 分区：小标题 + 圆角分组 + 底部说明，像系统设置那样 */
+      #${SETTINGS_ID} .ic-section { display: flex; flex-direction: column; gap: 6px; }
+      #${SETTINGS_ID} .ic-section[hidden] { display: none; }
+      #${SETTINGS_ID} .ic-label { font-size: 12px; opacity: 0.55; letter-spacing: 0.06em; padding-left: 4px; }
+      #${SETTINGS_ID} .ic-card { border-radius: 14px; background: rgba(127, 127, 127, 0.1); overflow: hidden; }
+      #${SETTINGS_ID} .ic-foot { margin: 0; padding: 0 4px; font-size: 12px; line-height: 1.55; opacity: 0.55; }
+      #${SETTINGS_ID} .ic-foot[hidden] { display: none; }
+      #${SETTINGS_ID} .ic-row {
+        display: flex; align-items: center; justify-content: space-between; gap: 12px;
+        min-height: 46px; padding: 0 14px; box-sizing: border-box;
+      }
+      #${SETTINGS_ID} .ic-row + .ic-row { box-shadow: inset 0 1px 0 rgba(127, 127, 127, 0.18); }
+      #${SETTINGS_ID} .ic-row[hidden] { display: none; }
+      #${SETTINGS_ID} .ic-row.ic-sub { padding-left: 30px; }
+      #${SETTINGS_ID} .ic-row.ic-sub span::before { content: '└'; margin-right: 6px; opacity: 0.35; }
+      #${SETTINGS_ID} .ic-act {
+        width: 100%; border: 0; background: none; text-align: left; font-size: 14px;
+        color: var(--SmartThemeQuoteColor, #e18a24);
+        transition: background-color 160ms ease;
+      }
+      #${SETTINGS_ID} .ic-act:active { background: rgba(127, 127, 127, 0.14); transition-duration: 0ms; }
+
+      /* 进入 / 离开：只用 transform + opacity，弹簧阻尼 */
+      #${SETTINGS_ID} .ic-in { animation: ic-spring-in 620ms ${SPRING_SOFT} both; }
+      #${SETTINGS_ID} .ic-out { animation: ic-fade-out 160ms cubic-bezier(0.4, 0, 1, 1) both; pointer-events: none; }
+      @keyframes ic-spring-in { from { opacity: 0; transform: translateY(-8px) scale(0.94); } to { opacity: 1; transform: none; } }
+      @keyframes ic-fade-out { to { opacity: 0; transform: scale(0.96); } }
+
+      /* 分段选择 */
+      #${SETTINGS_ID} .ic-seg { position: relative; display: grid; grid-template-columns: 1fr 1fr; padding: 3px; border-radius: 12px; background: rgba(127, 127, 127, 0.14); }
       #${SETTINGS_ID} .ic-seg .ic-ind {
         position: absolute; top: 3px; bottom: 3px; left: 3px; width: calc(50% - 3px); border-radius: 9px;
-        background: var(--SmartThemeQuoteColor, #e18a24); opacity: 0.9;
-        transition: transform 520ms ${SPRING_SOFT};
+        background: var(--SmartThemeBlurTintColor, rgba(60, 60, 60, 0.9)); box-shadow: 0 1px 4px rgba(0, 0, 0, 0.18);
+        transition: transform 560ms ${SPRING_SOFT};
       }
       #${SETTINGS_ID} .ic-seg[data-v="follow"] .ic-ind { transform: translateX(100%); }
-      #${SETTINGS_ID} .ic-seg button { position: relative; border: 0; background: none; padding: 7px 4px; font-size: 13px; border-radius: 9px; }
-      #${SETTINGS_ID} .ic-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 4px 0; }
-      #${SETTINGS_ID} .ic-row[hidden] { display: none; }
-      #${SETTINGS_ID} .ic-row.ic-pop { animation: ic-spring-in 720ms ${SPRING_SOFT} both; }
-      @keyframes ic-spring-in { from { opacity: 0; transform: translateY(-10px) scale(0.92); } to { opacity: 1; transform: none; } }
-      #${SETTINGS_ID} .ic-sub { padding-left: 12px; border-left: 2px solid var(--SmartThemeQuoteColor, #e18a24); }
+      #${SETTINGS_ID} .ic-seg button { position: relative; border: 0; background: none; padding: 8px 4px; font-size: 13px; border-radius: 9px; opacity: 0.6; transition: opacity 200ms ease; }
+      #${SETTINGS_ID} .ic-seg button[aria-pressed="true"] { opacity: 1; font-weight: 600; }
+
+      /* 开关：滑块用弹簧，按下时滑块朝运动方向拉长一点（预告要往哪边走），不缩放整个开关 */
       #${SETTINGS_ID} .ic-switch {
-        position: relative; flex: none; width: 46px; height: 26px; border-radius: 13px; border: 0; padding: 0;
-        background: rgba(127, 127, 127, 0.35); transition: background-color 200ms ease;
+        position: relative; flex: none; width: 48px; height: 28px; border-radius: 14px; border: 0; padding: 0;
+        background: rgba(127, 127, 127, 0.35); transition: background-color 260ms ease;
+        touch-action: manipulation;
       }
       #${SETTINGS_ID} .ic-switch::after {
-        content: ''; position: absolute; top: 3px; left: 3px; width: 20px; height: 20px; border-radius: 50%; background: #fff;
-        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3); transition: transform 420ms ${EASE_BACK};
+        content: ''; position: absolute; top: 3px; left: 3px; width: 22px; height: 22px; border-radius: 11px; background: #fff;
+        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+        transform-origin: left center;
+        transition: transform 460ms ${SPRING_SOFT}, width 0ms;
       }
       #${SETTINGS_ID} .ic-switch[aria-checked="true"] { background: var(--SmartThemeQuoteColor, #e18a24); }
       #${SETTINGS_ID} .ic-switch[aria-checked="true"]::after { transform: translateX(20px); }
-      #${SETTINGS_ID} .ic-btn {
-        border: 1px solid var(--SmartThemeBorderColor, rgba(255, 255, 255, 0.15)); background: rgba(127, 127, 127, 0.12);
-        border-radius: 12px; padding: 8px 12px; text-align: center;
-        transition: transform 380ms ${EASE_BACK};
-      }
-      #${SETTINGS_ID} .ic-btn:active, #${SETTINGS_ID} .ic-x:active, #${SETTINGS_ID} .ic-switch:active { transform: scale(0.93); transition: transform 80ms ease-out; }
-      #${SETTINGS_ID} .ic-switch:active::after { transform: scaleX(1.15); }
-      #${SETTINGS_ID} .ic-switch[aria-checked="true"]:active::after { transform: translateX(17px) scaleX(1.15); }
+      #${SETTINGS_ID} .ic-switch.ic-press::after { transform: scaleX(1.25); transition: transform 160ms ease-out; }
+      #${SETTINGS_ID} .ic-switch[aria-checked="true"].ic-press::after { transform-origin: right center; transform: translateX(20px) scaleX(1.25); }
+      #${SETTINGS_ID} .ic-x:active { transform: scale(0.88); transition: transform 90ms ease-out; }
     `;
     mainDoc.head.appendChild(style);
   }
@@ -782,28 +818,38 @@ $(() => {
     el.innerHTML = `
       <div class="ic-mask"></div>
       <div class="ic-sheet" role="dialog" aria-label="计数设置">
-        <div class="ic-head"><b>计数设置</b><button type="button" class="ic-x" aria-label="关闭">×</button></div>
-        <div class="ic-group">
-          <div class="ic-title">显示方式</div>
-          <div class="ic-seg" data-v="perFloor">
-            <span class="ic-ind"></span>
-            <button type="button" data-mode="perFloor">每层独立显示</button>
-            <button type="button" data-mode="follow">悬浮栏跟随楼层</button>
+        <div class="ic-bg"></div>
+        <div class="ic-body">
+          <div class="ic-head"><b>计数设置</b><button type="button" class="ic-x" aria-label="关闭">✕</button></div>
+
+          <div class="ic-section">
+            <div class="ic-label">显示方式</div>
+            <div class="ic-seg" data-v="perFloor">
+              <span class="ic-ind"></span>
+              <button type="button" data-mode="perFloor">每层独立</button>
+              <button type="button" data-mode="follow">跟随楼层</button>
+            </div>
+            <p class="ic-foot" data-note="perFloor">每层消息下方显示该层计数；悬浮栏仅统计输入框。</p>
+            <p class="ic-foot" data-note="follow">楼层内不显示计数。悬浮栏显示视口当前所在楼层；输入框获得焦点时，改为统计输入内容。</p>
           </div>
-          <p class="ic-note" data-note="perFloor">每一层下面各自显示计数，悬浮栏只算输入框。</p>
-          <p class="ic-note" data-note="follow">楼层上不再单独显示。悬浮栏显示屏幕上正在看的那一层；点输入框出现光标时，改为计算正在输入的文字。</p>
-        </div>
-        <div class="ic-group" data-group="pos">
-          <div class="ic-title">楼层计数位置</div>
-          <p class="ic-note">被美化挡住了？长按楼层计数约 0.4 秒，它会浮起来，这时拖到想放的地方松手。</p>
-          <div class="ic-row"><span>拖动一层，所有楼层跟着变</span><button type="button" class="ic-switch" role="switch" data-key="globalPos"></button></div>
-          <div class="ic-row ic-sub" data-row="splitRole"><span>角色和用户分开设置</span><button type="button" class="ic-switch" role="switch" data-key="splitRole"></button></div>
-          <button type="button" class="ic-btn" data-act="resetMes">楼层计数回到默认位置</button>
-        </div>
-        <div class="ic-group">
-          <div class="ic-title">悬浮栏</div>
-          <button type="button" class="ic-btn" data-act="resetBadge">悬浮栏归位</button>
-          <p class="ic-note">点一下收成小球，按住拖动可以移动，长按打开这里。</p>
+
+          <div class="ic-section" data-section="pos">
+            <div class="ic-label">楼层计数位置</div>
+            <div class="ic-card">
+              <div class="ic-row"><span>同步所有楼层位置</span><button type="button" class="ic-switch" role="switch" data-key="globalPos"></button></div>
+              <div class="ic-row ic-sub" data-row="splitRole"><span>角色与用户分别设置</span><button type="button" class="ic-switch" role="switch" data-key="splitRole"></button></div>
+              <div class="ic-row" style="padding:0"><button type="button" class="ic-row ic-act" data-act="resetMes">恢复默认位置</button></div>
+            </div>
+            <p class="ic-foot">长按楼层计数约 0.4 秒后可拖动，松开即保存位置。</p>
+          </div>
+
+          <div class="ic-section">
+            <div class="ic-label">悬浮栏</div>
+            <div class="ic-card">
+              <div class="ic-row" style="padding:0"><button type="button" class="ic-row ic-act" data-act="resetBadge">恢复默认位置</button></div>
+            </div>
+            <p class="ic-foot">单击：收起 / 展开　·　拖动：移动　·　长按：打开设置</p>
+          </div>
         </div>
       </div>`;
     mainDoc.body.appendChild(el);
@@ -811,20 +857,27 @@ $(() => {
     el.querySelector('.ic-mask').addEventListener('click', closeSettings);
     el.querySelector('.ic-x').addEventListener('click', closeSettings);
     el.querySelectorAll('.ic-seg button').forEach((b) => b.addEventListener('click', () => setMode(b.dataset.mode)));
-    el.querySelectorAll('.ic-switch').forEach((sw) => sw.addEventListener('click', () => {
-      const key = sw.dataset.key;
-      settings[key] = !settings[key];
-      saveSettings();
-      syncSettingsUI(key === 'globalPos');
-      // 切换位置规则后，所有楼层按新规则重新摆
-      applyAllLabelPos(null);
-    }));
+    el.querySelectorAll('.ic-switch').forEach((sw) => {
+      // 按下就给反馈（滑块拉长），不用等 click；松开 / 划走就收回
+      sw.addEventListener('pointerdown', () => sw.classList.add('ic-press'));
+      ['pointerup', 'pointercancel', 'pointerleave'].forEach((t) => sw.addEventListener(t, () => sw.classList.remove('ic-press')));
+      sw.addEventListener('click', () => {
+        sw.classList.remove('ic-press');
+        const key = sw.dataset.key;
+        settings[key] = !settings[key];
+        saveSettings();
+        sw.setAttribute('aria-checked', String(settings[key]));
+        if (key === 'globalPos') toggleSection(el.querySelector('[data-row="splitRole"]'), settings.globalPos);
+        // 切换位置规则后，所有楼层按新规则重新摆
+        applyAllLabelPos(null);
+      });
+    });
     el.querySelector('[data-act="resetMes"]').addEventListener('click', () => {
       settings.pos = { all: null, user: null, char: null };
       settings.perMes = {};
       saveSettings();
       applyAllLabelPos(null);
-      toast('楼层计数已回到默认位置');
+      toast('楼层计数已恢复默认位置');
     });
     el.querySelector('[data-act="resetBadge"]').addEventListener('click', () => {
       closeSettings();
@@ -833,17 +886,55 @@ $(() => {
     return el;
   }
 
-  function syncSettingsUI(popSub = false) {
+  // 浮窗内容增减时的弹簧过渡（FLIP）：
+  // 先记下背景和各分区的位置 → 改内容 → 背景从旧尺寸 translateY + scaleY 弹到新尺寸，分区从旧位置 translateY 弹到新位置。
+  function resizeSheet(mutate) {
+    const el = getSettingsEl();
+    const bg = el.querySelector('.ic-bg');
+    const items = [...el.querySelectorAll('.ic-head, .ic-section:not([hidden])')];
+    const b0 = bg.getBoundingClientRect();
+    const tops = new Map(items.map((n) => [n, n.getBoundingClientRect().top]));
+    mutate();
+    const b1 = bg.getBoundingClientRect();
+    if (!b1.height) return;
+    const opts = { duration: 640, easing: SPRING_SOFT };
+    if (Math.abs(b0.height - b1.height) > 0.5 || Math.abs(b0.top - b1.top) > 0.5) {
+      bg.animate([{ transform: `translateY(${b0.top - b1.top}px) scaleY(${b0.height / b1.height})` }, { transform: 'none' }], opts);
+    }
+    tops.forEach((top, n) => {
+      if (!n.isConnected || n.hidden) return;
+      const dy = top - n.getBoundingClientRect().top;
+      if (Math.abs(dy) > 0.5) n.animate([{ transform: `translateY(${dy}px)` }, { transform: 'none' }], opts);
+    });
+  }
+
+  // 显示 / 隐藏一块内容：出现时弹簧弹入，消失时先淡出再收起，浮窗尺寸都跟着弹簧过渡
+  function toggleSection(node, show) {
+    if (show === !node.hidden && !node.classList.contains('ic-out')) return;
+    clearTimeout(node._icTimer);
+    if (show) {
+      node.classList.remove('ic-out', 'ic-in');
+      resizeSheet(() => { node.hidden = false; });
+      void node.offsetWidth;
+      node.classList.add('ic-in');
+    } else {
+      node.classList.remove('ic-in');
+      node.classList.add('ic-out');
+      node._icTimer = setTimeout(() => {
+        node.classList.remove('ic-out');
+        resizeSheet(() => { node.hidden = true; });
+      }, 150);
+    }
+  }
+
+  function syncSettingsUI() {
     const el = getSettingsEl();
     el.querySelector('.ic-seg').dataset.v = settings.mode;
+    el.querySelectorAll('.ic-seg button').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.mode === settings.mode)));
     el.querySelectorAll('[data-note]').forEach((n) => { n.hidden = n.dataset.note !== settings.mode; });
-    el.querySelector('[data-group="pos"]').hidden = isFollow();
+    el.querySelector('[data-section="pos"]').hidden = isFollow();
     el.querySelectorAll('.ic-switch').forEach((sw) => sw.setAttribute('aria-checked', String(!!settings[sw.dataset.key])));
-    const sub = el.querySelector('[data-row="splitRole"]');
-    sub.hidden = !settings.globalPos;
-    // "角色和用户分开设置"出现时用弹簧阻尼弹出来
-    sub.classList.remove('ic-pop');
-    if (popSub && settings.globalPos) { void sub.offsetWidth; sub.classList.add('ic-pop'); }
+    el.querySelector('[data-row="splitRole"]').hidden = !settings.globalPos;
   }
 
   let settingsCloseTimer = null;
@@ -866,7 +957,17 @@ $(() => {
     if (settings.mode === mode) return;
     settings.mode = mode;
     saveSettings();
-    syncSettingsUI();
+    const el = getSettingsEl();
+    el.querySelector('.ic-seg').dataset.v = mode;
+    el.querySelectorAll('.ic-seg button').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.mode === mode)));
+    // 说明文字和"楼层计数位置"分区一起换，浮窗尺寸弹簧过渡
+    resizeSheet(() => {
+      el.querySelectorAll('[data-note]').forEach((n) => {
+        n.hidden = n.dataset.note !== mode;
+        if (!n.hidden) { n.classList.remove('ic-in'); void n.offsetWidth; n.classList.add('ic-in'); }
+      });
+    });
+    toggleSection(el.querySelector('[data-section="pos"]'), !isFollow());
     if (isFollow()) clearMessageLabels();
     else scanMessages();
     updateBadge(true);
