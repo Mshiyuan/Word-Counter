@@ -242,10 +242,17 @@ $(() => {
       body.${MES_ON_CLASS} #chat .mes .tokenCounterDisplay { display: none !important; }
 
       /* ---------- 设置浮窗 ---------- */
+      /* ST 里 position: fixed 的层级会被压在聊天区后面；照书摘的做法，absolute 贴 body 铺满 + 超高 z-index
+         （ST 的 body 本身不滚动，absolute 贴 body 视觉上等于固定） */
       #${SETTINGS_ID} {
-        position: fixed;
-        inset: 0;
-        z-index: 10050;
+        position: absolute;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100vh;
+        height: 100dvh;
+        box-sizing: border-box;
+        z-index: 2147483630;
         display: flex;
         align-items: center;
         justify-content: center;
