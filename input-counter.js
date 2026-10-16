@@ -807,11 +807,30 @@ $(() => {
     }
   }
 
+  // 只处理屏幕上看得到的楼层，再加上下各 MES_MARGIN 层的余量：
+  // 滚动时提前算好，眼睛看到时已经有数字；看不到的老楼层不算，长聊天也不会一下子发几百次分词请求。
+  const MES_MARGIN = 10;
+  function visibleRange(els) {
+    const chat = mainDoc.getElementById('chat');
+    const n = els.length;
+    if (!chat || !n) return [0, n - 1];
+    const cr = chat.getBoundingClientRect();
+    const top = cr.top, bottom = Math.min(cr.bottom, mainWin.innerHeight);
+    // 第一层底边在视口顶之下的楼层
+    let lo = 0, hi = n - 1, first = n - 1;
+    while (lo <= hi) { const mid = (lo + hi) >> 1; if (els[mid].getBoundingClientRect().bottom >= top) { first = mid; hi = mid - 1; } else lo = mid + 1; }
+    // 最后一层顶边在视口底之上的楼层
+    lo = first; hi = n - 1; let last = first;
+    while (lo <= hi) { const mid = (lo + hi) >> 1; if (els[mid].getBoundingClientRect().top <= bottom) { last = mid; lo = mid + 1; } else hi = mid - 1; }
+    return [Math.max(0, first - MES_MARGIN), Math.min(n - 1, last + MES_MARGIN)];
+  }
+
   function scanMessages() {
     if (!enabled || isFollow()) return;
     const els = mainDoc.querySelectorAll('#chat .mes[mesid]');
-    // 从最新的楼层往前排，先算眼前能看到的
-    for (let i = els.length - 1; i >= 0; i--) {
+    const [from, to] = visibleRange(els);
+    // 从下往上排，先算眼前和下方（最新）的楼层
+    for (let i = to; i >= from; i--) {
       const el = els[i];
       const parts = getMesParts(el);
       if (mesTextOf.get(el) === parts.tok && el.querySelector(`.${MES_CLASS}`)) continue;
@@ -1053,9 +1072,16 @@ $(() => {
   const onFocusChange = () => setTimeout(() => updateBadge(), 0);
   const onResize = () => positionBadge();
   let scrollRaf = 0;
+  // 跟随模式：滚动时更新悬浮栏；每层独立模式：滚动时补算新进入范围的楼层
+  // （补算节流到 150ms 一次，快速滑动时不会每帧都去读楼层内容，避免卡顿）
+  let scanThrottle = 0;
   const onChatScroll = () => {
-    if (!isFollow() || scrollRaf) return;
-    scrollRaf = mainWin.requestAnimationFrame(() => { scrollRaf = 0; updateBadge(); });
+    if (isFollow()) {
+      if (scrollRaf) return;
+      scrollRaf = mainWin.requestAnimationFrame(() => { scrollRaf = 0; updateBadge(); });
+    } else if (!scanThrottle) {
+      scanThrottle = setTimeout(() => { scanThrottle = 0; scanMessages(); }, 150);
+    }
   };
   let boundChat = null;
   function bindTargets() {
@@ -1125,6 +1151,7 @@ $(() => {
     clearTimeout(tokenTimer);
     clearTimeout(settingsCloseTimer);
     if (scrollRaf) mainWin.cancelAnimationFrame(scrollRaf);
+    clearTimeout(scanThrottle);
     mainWin.removeEventListener('resize', onResize);
     cleanup();
   });
