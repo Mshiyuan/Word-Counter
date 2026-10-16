@@ -545,17 +545,17 @@ $(() => {
   function updateBadge(force = false) {
     if (!enabled) return;
     const ta = getTextarea();
-    let text = '', where = '', key = '';
+    let text = '', tokText = '', where = '', key = '';
     if (isFollow() && !(ta && mainDoc.activeElement === ta)) {
       const el = currentFloorEl();
       if (el) {
-        text = getMesText(el);
+        ({ body: text, tok: tokText } = getMesParts(el));
         where = `#${el.getAttribute('mesid')}`;
       }
-      key = `floor:${where}:${text}`;
+      key = `floor:${where}:${tokText}`;
     } else {
       if (!ta) return;
-      text = ta.value || '';
+      text = tokText = ta.value || '';
       where = isFollow() ? '输入' : '';
       key = `input:${where}:${text}`;
     }
@@ -570,16 +570,16 @@ $(() => {
 
     // 字数是即时的；token 要调分词器（可能走后端），防抖后再算，期间先把旧数字变淡
     const tokEl = badge.querySelector('.ic-tokens');
-    const cached = tokenCache.get(text);
+    const cached = tokenCache.get(tokText);
     clearTimeout(tokenTimer);
     const seq = ++tokenSeq;
-    if (!text || cached) {
-      tokEl.textContent = `Token ${text ? fmtTokens(cached) : 0}`;
+    if (!tokText || cached) {
+      tokEl.textContent = `Token ${tokText ? fmtTokens(cached) : 0}`;
       tokEl.classList.remove('ic-pending');
     } else {
       tokEl.classList.add('ic-pending');
       tokenTimer = setTimeout(async () => {
-        const r = await countTokensCached(text);
+        const r = await countTokensCached(tokText);
         if (seq !== tokenSeq) return; // 期间内容又变了，丢弃过期结果
         tokEl.textContent = `Token ${fmtTokens(r)}`;
         tokEl.classList.remove('ic-pending');
@@ -598,12 +598,17 @@ $(() => {
   const queue = [];
   let queueRunning = false;
 
-  function getMesText(mesEl) {
+  // body：正文，用来算字数；tok：思维链 + 正文，用来算 token。
+  // 酒馆自带的楼层 token 就是 (extra.reasoning || '') + mes 一起算的，这里保持同一口径，数字才对得上。
+  function getMesParts(mesEl) {
     const id = Number(mesEl.getAttribute('mesid'));
-    const ctx = getCtx();
-    const msg = ctx?.chat?.[id];
-    if (msg && typeof msg.mes === 'string') return msg.mes;
-    return mesEl.querySelector('.mes_text')?.innerText || '';
+    const msg = getCtx()?.chat?.[id];
+    if (msg && typeof msg.mes === 'string') {
+      const reasoning = typeof msg.extra?.reasoning === 'string' ? msg.extra.reasoning : '';
+      return { body: msg.mes, tok: reasoning + msg.mes, hasReasoning: !!reasoning };
+    }
+    const body = mesEl.querySelector('.mes_text')?.innerText || '';
+    return { body, tok: body, hasReasoning: false };
   }
 
   function isUserMes(mesEl) {
@@ -753,11 +758,11 @@ $(() => {
     return label;
   }
 
-  function renderMesLabel(label, text, tokens) {
-    const w = countWords(text);
+  function renderMesLabel(label, parts, tokens) {
+    const w = countWords(parts.body);
     label.querySelector('.ic-tokens').textContent = `Token ${tokens ?? '…'}`;
     label.querySelector('.ic-words').textContent = `字数 ${w.words}`;
-    label.title = `Token ${tokens ?? '计算中'}｜字数 ${w.words}｜字符 ${w.chars}\n长按后可拖动位置`;
+    label.title = `Token ${tokens ?? '计算中'}${parts.hasReasoning ? '（含思维链）' : ''}｜正文字数 ${w.words}｜字符 ${w.chars}\n长按后可拖动位置`;
     label.classList.toggle('ic-pending', tokens == null);
   }
 
@@ -766,12 +771,12 @@ $(() => {
     queueRunning = true;
     try {
       while (queue.length && enabled && !isFollow()) {
-        const { el, text } = queue.shift();
-        if (!el.isConnected || mesTextOf.get(el) !== text) continue; // 楼层没了或内容又变了
-        const r = await countTokensCached(text);
-        if (!el.isConnected || mesTextOf.get(el) !== text) continue;
+        const { el, parts } = queue.shift();
+        if (!el.isConnected || mesTextOf.get(el) !== parts.tok) continue; // 楼层没了或内容又变了
+        const r = await countTokensCached(parts.tok);
+        if (!el.isConnected || mesTextOf.get(el) !== parts.tok) continue;
         const label = getMesLabel(el);
-        if (label) renderMesLabel(label, text, fmtTokens(r));
+        if (label) renderMesLabel(label, parts, fmtTokens(r));
       }
     } finally {
       queueRunning = false;
@@ -784,17 +789,17 @@ $(() => {
     // 从最新的楼层往前排，先算眼前能看到的
     for (let i = els.length - 1; i >= 0; i--) {
       const el = els[i];
-      const text = getMesText(el);
-      if (mesTextOf.get(el) === text && el.querySelector(`.${MES_CLASS}`)) continue;
-      mesTextOf.set(el, text);
+      const parts = getMesParts(el);
+      if (mesTextOf.get(el) === parts.tok && el.querySelector(`.${MES_CLASS}`)) continue;
+      mesTextOf.set(el, parts.tok);
       const label = getMesLabel(el);
       if (!label) continue;
-      const cached = tokenCache.get(text);
-      if (!text) renderMesLabel(label, text, '0');
-      else if (cached) renderMesLabel(label, text, fmtTokens(cached));
+      const cached = tokenCache.get(parts.tok);
+      if (!parts.tok) renderMesLabel(label, parts, '0');
+      else if (cached) renderMesLabel(label, parts, fmtTokens(cached));
       else {
-        renderMesLabel(label, text, null);
-        queue.push({ el, text });
+        renderMesLabel(label, parts, null);
+        queue.push({ el, parts });
       }
     }
     runQueue();
