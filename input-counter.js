@@ -351,7 +351,7 @@ $(() => {
       #${SETTINGS_ID} .ic-rowgroup.ic-in { animation: none; }
       #${SETTINGS_ID} .ic-rowgroup.ic-in > .ic-row { animation: ic-spring-in 620ms ${SPRING_SOFT} both; }
       #${SETTINGS_ID} .ic-rowgroup.ic-in > .ic-row:nth-child(2) { animation-delay: 60ms; }
-      #${SETTINGS_ID} .ic-row.ic-sub span::before { content: '└'; margin-right: 6px; opacity: 0.35; }
+      #${SETTINGS_ID} .ic-row.ic-sub > span:first-child::before { content: '└'; margin-right: 6px; opacity: 0.35; }
       #${SETTINGS_ID} .ic-act {
         width: 100%; border: 0; background: none; text-align: left; font-size: 14px;
         color: var(--SmartThemeQuoteColor, #e18a24);
