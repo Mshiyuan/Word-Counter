@@ -344,7 +344,7 @@ $(() => {
       #${SETTINGS_ID} .ic-row.ic-sub { padding-left: 30px; }
       #${SETTINGS_ID} .ic-lbl > span { display: inline-block; }
       #${SETTINGS_ID} .ic-prefix[hidden] { display: none; }
-      #${SETTINGS_ID} .ic-prefix { opacity: 0.6; white-space: pre; }
+      #${SETTINGS_ID} .ic-prefix, #${SETTINGS_ID} .ic-tag { opacity: 0.6; white-space: pre; }
       /* 用户那两行是一组：组本身不做动画，两行依次弹入 */
       #${SETTINGS_ID} .ic-rowgroup { box-shadow: inset 0 1px 0 rgba(127, 127, 127, 0.18); }
       #${SETTINGS_ID} .ic-rowgroup[hidden] { display: none; }
@@ -939,8 +939,8 @@ $(() => {
               <div class="ic-row"><span class="ic-lbl"><span class="ic-prefix">角色 · </span><span class="ic-text">计入隐藏内容</span></span><button type="button" class="ic-switch" role="switch" data-key="countHidden"></button></div>
               <div class="ic-row"><span>角色与用户分别设置</span><button type="button" class="ic-switch" role="switch" data-key="splitCount"></button></div>
               <div class="ic-rowgroup" data-row="userCount">
-                <div class="ic-row ic-sub"><span>用户 · 计入思维链</span><button type="button" class="ic-switch" role="switch" data-key="userReasoning"></button></div>
-                <div class="ic-row ic-sub"><span>用户 · 计入隐藏内容</span><button type="button" class="ic-switch" role="switch" data-key="userHidden"></button></div>
+                <div class="ic-row ic-sub"><span class="ic-lbl"><span class="ic-tag">用户 · </span><span>计入思维链</span></span><button type="button" class="ic-switch" role="switch" data-key="userReasoning"></button></div>
+                <div class="ic-row ic-sub"><span class="ic-lbl"><span class="ic-tag">用户 · </span><span>计入隐藏内容</span></span><button type="button" class="ic-switch" role="switch" data-key="userHidden"></button></div>
               </div>
             </div>
             <p class="ic-foot">计入思维链：开启时楼层 Token 与酒馆自带计数一致。<br>计入隐藏内容：关闭后仅统计页面上显示的文字，不计 HTML 标签、注释、被正则隐藏的内容及 Markdown 符号。<br>角色与用户分别设置：开启后角色消息和用户消息各用一组开关；关闭时共用上面一组。输入框始终按原文统计。</p>
