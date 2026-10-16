@@ -41,8 +41,9 @@ $(() => {
   //   pos        全局位置 { all, user, char }；perMes 每层独立位置 { '聊天#楼层号': pos }
   //   位置格式   { h: 'left'|'right', x: px, v: 'top'|'bottom', y: px }，贴最近的两条边，楼层高矮不同也不会跑偏
   //   countReasoning  楼层 Token 是否计入思维链（酒馆自带计数是计入的）
+  //   hideNative      是否隐藏酒馆自带的楼层 Token 显示
   //   countHidden     是否计入隐藏内容（HTML 标签、注释、被正则隐藏的部分、Markdown 符号）；关闭后只算页面上显示出来的文字
-  const DEFAULT_SETTINGS = { mode: 'perFloor', globalPos: true, splitRole: false, countReasoning: true, countHidden: true, pos: { all: null, user: null, char: null }, perMes: {} };
+  const DEFAULT_SETTINGS = { mode: 'perFloor', globalPos: true, splitRole: false, countReasoning: true, countHidden: true, hideNative: true, pos: { all: null, user: null, char: null }, perMes: {} };
   const settings = (() => {
     try {
       const s = JSON.parse(lsGet(LS_SETTINGS) || 'null') || {};
@@ -616,6 +617,11 @@ $(() => {
     return { body, tok: reasoning + body, hasReasoning: !!reasoning };
   }
 
+  // 酒馆自带的楼层 Token 显示：脚本开启且设置里选了隐藏时才藏
+  function syncNativeHidden() {
+    mainDoc.body.classList.toggle(MES_ON_CLASS, enabled && settings.hideNative);
+  }
+
   // 统计口径变了：所有楼层和悬浮栏按新口径重算
   function recountAll() {
     mesTextOf = new WeakMap();
@@ -849,6 +855,9 @@ $(() => {
             </div>
             <p class="ic-foot" data-note="perFloor">每层消息下方显示该层计数；悬浮栏仅统计输入框。</p>
             <p class="ic-foot" data-note="follow">楼层内不显示计数。悬浮栏显示视口当前所在楼层；输入框获得焦点时，改为统计输入内容。</p>
+            <div class="ic-card">
+              <div class="ic-row"><span>隐藏酒馆自带楼层计数</span><button type="button" class="ic-switch" role="switch" data-key="hideNative"></button></div>
+            </div>
           </div>
 
           <div class="ic-section" data-section="pos">
@@ -895,6 +904,7 @@ $(() => {
         saveSettings();
         sw.setAttribute('aria-checked', String(settings[key]));
         if (key === 'countReasoning' || key === 'countHidden') { recountAll(); return; }
+        if (key === 'hideNative') { syncNativeHidden(); return; }
         if (key === 'globalPos') toggleSection(el.querySelector('[data-row="splitRole"]'), settings.globalPos);
         // 切换位置规则后，所有楼层按新规则重新摆
         applyAllLabelPos(null);
@@ -1009,7 +1019,7 @@ $(() => {
     enabled = v;
     lsSet(LS_ENABLED, v ? '1' : '0');
     getBadge().hidden = !v;
-    mainDoc.body.classList.toggle(MES_ON_CLASS, v);
+    syncNativeHidden();
     if (v) { updateBadge(true); scanMessages(); } else { clearMessageLabels(); closeSettings(); }
     toast(v ? '计数已开启' : '计数已关闭');
   }
@@ -1101,7 +1111,7 @@ $(() => {
   cleanup(); // 上一个实例如果没清理干净（热重载），先拆掉残留
   injectStyle();
   getBadge().hidden = !enabled;
-  mainDoc.body.classList.toggle(MES_ON_CLASS, enabled);
+  syncNativeHidden();
   bindTargets();
   setupButton();
   updateBadge(true);
