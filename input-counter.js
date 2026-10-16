@@ -1064,7 +1064,9 @@ $(() => {
       const opts = { duration: 560, easing: SPRING_SOFT };
       if (Math.abs(dx) > 0.5) text.animate([{ transform: `translateX(${dx}px)` }, { transform: 'none' }], opts);
       if (settings.splitCount) {
-        prefix.animate([{ opacity: 0, transform: 'translateX(-8px)' }, { opacity: 1, transform: 'none' }], opts);
+        // 淡入的终点用 CSS 里的浅色透明度，而不是 1，否则动画期间是深色、结束才跳回浅色
+        const target = Number(mainWin.getComputedStyle(prefix).opacity) || 0.6;
+        prefix.animate([{ opacity: 0, transform: 'translateX(-8px)' }, { opacity: target, transform: 'none' }], opts);
       }
     });
   }
