@@ -1054,8 +1054,8 @@ $(() => {
   // 分开设置时，上面那组开关前面加"角色 · "，和下面"用户 · "那组对应
   // 动画：前缀出现 / 消失时，后面的文字用 FLIP 从原位置弹簧滑到新位置，前缀本身淡入并从左侧滑进来
   function syncRoleLabels(animate = false) {
-    getSettingsEl().querySelectorAll('.ic-lbl').forEach((lbl) => {
-      const prefix = lbl.querySelector('.ic-prefix');
+    getSettingsEl().querySelectorAll('.ic-prefix').forEach((prefix) => {
+      const lbl = prefix.parentElement;
       const text = lbl.querySelector('.ic-text');
       const before = animate ? text.getBoundingClientRect().left : 0;
       prefix.hidden = !settings.splitCount;
