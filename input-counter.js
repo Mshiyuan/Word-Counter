@@ -1,4 +1,4 @@
-// 输入计数：输入框实时 Token + 字数，以及每个楼层的 Token + 字数
+// 计字簿：输入框实时 Token + 字数，以及每个楼层的 Token + 字数
 // 作者：时鸢
 // 运行环境：酒馆助手（Tavern Helper）脚本。脚本跑在 iframe 里，UI 挂在父文档（酒馆主页面）上。
 // 不改动酒馆源码，只读输入框和聊天记录的内容，用酒馆自己的分词器算 token。
@@ -7,7 +7,7 @@ $(() => {
   const mainDoc = mainWin.document;
 
   const SCRIPT_ID = 'input-counter';
-  const BUTTON_NAME = '输入计数';
+  const BUTTON_NAME = '计字簿';
   const LS_ENABLED = `${SCRIPT_ID}:enabled`;
   const LS_POS = `${SCRIPT_ID}:pos`;
   const LS_COLLAPSED = `${SCRIPT_ID}:collapsed`;
@@ -846,10 +846,10 @@ $(() => {
     el.hidden = true;
     el.innerHTML = `
       <div class="ic-mask"></div>
-      <div class="ic-sheet" role="dialog" aria-label="计数设置">
+      <div class="ic-sheet" role="dialog" aria-label="计字簿设置">
         <div class="ic-bg"></div>
         <div class="ic-body">
-          <div class="ic-head"><b>计数设置</b><button type="button" class="ic-x" aria-label="关闭">✕</button></div>
+          <div class="ic-head"><b>计字簿设置</b><button type="button" class="ic-x" aria-label="关闭">✕</button></div>
 
           <div class="ic-section">
             <div class="ic-label">显示方式</div>
