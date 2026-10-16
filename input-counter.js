@@ -851,15 +851,6 @@ $(() => {
             <p class="ic-foot" data-note="follow">楼层内不显示计数。悬浮栏显示视口当前所在楼层；输入框获得焦点时，改为统计输入内容。</p>
           </div>
 
-          <div class="ic-section">
-            <div class="ic-label">统计口径</div>
-            <div class="ic-card">
-              <div class="ic-row"><span>计入思维链</span><button type="button" class="ic-switch" role="switch" data-key="countReasoning"></button></div>
-              <div class="ic-row"><span>计入隐藏内容</span><button type="button" class="ic-switch" role="switch" data-key="countHidden"></button></div>
-            </div>
-            <p class="ic-foot">计入思维链：开启时楼层 Token 与酒馆自带计数一致。<br>计入隐藏内容：关闭后仅统计页面上显示的文字，不计 HTML 标签、注释、被正则隐藏的内容及 Markdown 符号。输入框始终按原文统计。</p>
-          </div>
-
           <div class="ic-section" data-section="pos">
             <div class="ic-label">楼层计数位置</div>
             <div class="ic-card">
@@ -868,6 +859,15 @@ $(() => {
               <div class="ic-row" style="padding:0"><button type="button" class="ic-row ic-act" data-act="resetMes">恢复默认位置</button></div>
             </div>
             <p class="ic-foot">长按楼层计数约 0.4 秒后可拖动，松开即保存位置。</p>
+          </div>
+
+          <div class="ic-section">
+            <div class="ic-label">统计口径</div>
+            <div class="ic-card">
+              <div class="ic-row"><span>计入思维链</span><button type="button" class="ic-switch" role="switch" data-key="countReasoning"></button></div>
+              <div class="ic-row"><span>计入隐藏内容</span><button type="button" class="ic-switch" role="switch" data-key="countHidden"></button></div>
+            </div>
+            <p class="ic-foot">计入思维链：开启时楼层 Token 与酒馆自带计数一致。<br>计入隐藏内容：关闭后仅统计页面上显示的文字，不计 HTML 标签、注释、被正则隐藏的内容及 Markdown 符号。输入框始终按原文统计。</p>
           </div>
 
           <div class="ic-section">
