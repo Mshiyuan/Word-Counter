@@ -40,7 +40,9 @@ $(() => {
   //   splitRole  （globalPos 打开时）角色和用户分开记位置
   //   pos        全局位置 { all, user, char }；perMes 每层独立位置 { '聊天#楼层号': pos }
   //   位置格式   { h: 'left'|'right', x: px, v: 'top'|'bottom', y: px }，贴最近的两条边，楼层高矮不同也不会跑偏
-  const DEFAULT_SETTINGS = { mode: 'perFloor', globalPos: true, splitRole: false, pos: { all: null, user: null, char: null }, perMes: {} };
+  //   countReasoning  楼层 Token 是否计入思维链（酒馆自带计数是计入的）
+  //   countHidden     是否计入隐藏内容（HTML 标签、注释、被正则隐藏的部分、Markdown 符号）；关闭后只算页面上显示出来的文字
+  const DEFAULT_SETTINGS = { mode: 'perFloor', globalPos: true, splitRole: false, countReasoning: true, countHidden: true, pos: { all: null, user: null, char: null }, perMes: {} };
   const settings = (() => {
     try {
       const s = JSON.parse(lsGet(LS_SETTINGS) || 'null') || {};
@@ -593,22 +595,33 @@ $(() => {
   //  二、楼层计数：每条消息都显示 Token + 字数（包括很早以前的楼层）
   // =====================================================================
   // 每个楼层元素上次算的是哪段文本；文本变了（编辑、切换 swipe、流式输出）就重算
-  const mesTextOf = new WeakMap();
+  let mesTextOf = new WeakMap();
   // token 计算排队一个一个来，几百层的老聊天也不会一下子把后端打满
   const queue = [];
   let queueRunning = false;
 
   // body：正文，用来算字数；tok：思维链 + 正文，用来算 token。
   // 酒馆自带的楼层 token 就是 (extra.reasoning || '') + mes 一起算的，这里保持同一口径，数字才对得上。
+  // 设置里可以关掉思维链、关掉隐藏内容（关掉后改用页面上实际显示的文字）
   function getMesParts(mesEl) {
     const id = Number(mesEl.getAttribute('mesid'));
     const msg = getCtx()?.chat?.[id];
-    if (msg && typeof msg.mes === 'string') {
-      const reasoning = typeof msg.extra?.reasoning === 'string' ? msg.extra.reasoning : '';
-      return { body: msg.mes, tok: reasoning + msg.mes, hasReasoning: !!reasoning };
+    const shown = () => mesEl.querySelector('.mes_text')?.innerText || '';
+    const body = settings.countHidden && msg && typeof msg.mes === 'string' ? msg.mes : shown();
+    let reasoning = '';
+    if (settings.countReasoning) {
+      if (settings.countHidden) reasoning = typeof msg?.extra?.reasoning === 'string' ? msg.extra.reasoning : '';
+      else reasoning = mesEl.querySelector('.mes_reasoning')?.innerText || '';
     }
-    const body = mesEl.querySelector('.mes_text')?.innerText || '';
-    return { body, tok: body, hasReasoning: false };
+    return { body, tok: reasoning + body, hasReasoning: !!reasoning };
+  }
+
+  // 统计口径变了：所有楼层和悬浮栏按新口径重算
+  function recountAll() {
+    mesTextOf = new WeakMap();
+    queue.length = 0;
+    scanMessages();
+    updateBadge(true);
   }
 
   function isUserMes(mesEl) {
@@ -838,6 +851,15 @@ $(() => {
             <p class="ic-foot" data-note="follow">楼层内不显示计数。悬浮栏显示视口当前所在楼层；输入框获得焦点时，改为统计输入内容。</p>
           </div>
 
+          <div class="ic-section">
+            <div class="ic-label">统计口径</div>
+            <div class="ic-card">
+              <div class="ic-row"><span>计入思维链</span><button type="button" class="ic-switch" role="switch" data-key="countReasoning"></button></div>
+              <div class="ic-row"><span>计入隐藏内容</span><button type="button" class="ic-switch" role="switch" data-key="countHidden"></button></div>
+            </div>
+            <p class="ic-foot">计入思维链：开启时楼层 Token 与酒馆自带计数一致。<br>计入隐藏内容：关闭后仅统计页面上显示的文字，不计 HTML 标签、注释、被正则隐藏的内容及 Markdown 符号。输入框始终按原文统计。</p>
+          </div>
+
           <div class="ic-section" data-section="pos">
             <div class="ic-label">楼层计数位置</div>
             <div class="ic-card">
@@ -872,6 +894,7 @@ $(() => {
         settings[key] = !settings[key];
         saveSettings();
         sw.setAttribute('aria-checked', String(settings[key]));
+        if (key === 'countReasoning' || key === 'countHidden') { recountAll(); return; }
         if (key === 'globalPos') toggleSection(el.querySelector('[data-row="splitRole"]'), settings.globalPos);
         // 切换位置规则后，所有楼层按新规则重新摆
         applyAllLabelPos(null);
