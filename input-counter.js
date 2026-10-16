@@ -342,6 +342,15 @@ $(() => {
       #${SETTINGS_ID} .ic-row + .ic-row { box-shadow: inset 0 1px 0 rgba(127, 127, 127, 0.18); }
       #${SETTINGS_ID} .ic-row[hidden] { display: none; }
       #${SETTINGS_ID} .ic-row.ic-sub { padding-left: 30px; }
+      #${SETTINGS_ID} .ic-lbl > span { display: inline-block; }
+      #${SETTINGS_ID} .ic-prefix[hidden] { display: none; }
+      #${SETTINGS_ID} .ic-prefix { opacity: 0.6; white-space: pre; }
+      /* 用户那两行是一组：组本身不做动画，两行依次弹入 */
+      #${SETTINGS_ID} .ic-rowgroup { box-shadow: inset 0 1px 0 rgba(127, 127, 127, 0.18); }
+      #${SETTINGS_ID} .ic-rowgroup[hidden] { display: none; }
+      #${SETTINGS_ID} .ic-rowgroup.ic-in { animation: none; }
+      #${SETTINGS_ID} .ic-rowgroup.ic-in > .ic-row { animation: ic-spring-in 620ms ${SPRING_SOFT} both; }
+      #${SETTINGS_ID} .ic-rowgroup.ic-in > .ic-row:nth-child(2) { animation-delay: 60ms; }
       #${SETTINGS_ID} .ic-row.ic-sub span::before { content: '└'; margin-right: 6px; opacity: 0.35; }
       #${SETTINGS_ID} .ic-act {
         width: 100%; border: 0; background: none; text-align: left; font-size: 14px;
@@ -926,11 +935,13 @@ $(() => {
           <div class="ic-section">
             <div class="ic-label">统计口径</div>
             <div class="ic-card">
-              <div class="ic-row"><span data-role-label="角色 · ">计入思维链</span><button type="button" class="ic-switch" role="switch" data-key="countReasoning"></button></div>
-              <div class="ic-row"><span data-role-label="角色 · ">计入隐藏内容</span><button type="button" class="ic-switch" role="switch" data-key="countHidden"></button></div>
+              <div class="ic-row"><span class="ic-lbl"><span class="ic-prefix">角色 · </span><span class="ic-text">计入思维链</span></span><button type="button" class="ic-switch" role="switch" data-key="countReasoning"></button></div>
+              <div class="ic-row"><span class="ic-lbl"><span class="ic-prefix">角色 · </span><span class="ic-text">计入隐藏内容</span></span><button type="button" class="ic-switch" role="switch" data-key="countHidden"></button></div>
               <div class="ic-row"><span>角色与用户分别设置</span><button type="button" class="ic-switch" role="switch" data-key="splitCount"></button></div>
-              <div class="ic-row ic-sub" data-row="userCount"><span>用户 · 计入思维链</span><button type="button" class="ic-switch" role="switch" data-key="userReasoning"></button></div>
-              <div class="ic-row ic-sub" data-row="userCount"><span>用户 · 计入隐藏内容</span><button type="button" class="ic-switch" role="switch" data-key="userHidden"></button></div>
+              <div class="ic-rowgroup" data-row="userCount">
+                <div class="ic-row ic-sub"><span>用户 · 计入思维链</span><button type="button" class="ic-switch" role="switch" data-key="userReasoning"></button></div>
+                <div class="ic-row ic-sub"><span>用户 · 计入隐藏内容</span><button type="button" class="ic-switch" role="switch" data-key="userHidden"></button></div>
+              </div>
             </div>
             <p class="ic-foot">计入思维链：开启时楼层 Token 与酒馆自带计数一致。<br>计入隐藏内容：关闭后仅统计页面上显示的文字，不计 HTML 标签、注释、被正则隐藏的内容及 Markdown 符号。<br>角色与用户分别设置：开启后角色消息和用户消息各用一组开关；关闭时共用上面一组。输入框始终按原文统计。</p>
           </div>
@@ -961,10 +972,12 @@ $(() => {
         saveSettings();
         sw.setAttribute('aria-checked', String(settings[key]));
         if (key === 'splitCount') {
-          el.querySelectorAll('[data-row="userCount"]').forEach((n) => toggleSection(n, settings.splitCount));
-          syncRoleLabels();
+          // 用户那两行作为一组一起进出（只做一次尺寸过渡），上面两行的"角色 · "前缀同时滑入 / 滑出
+          toggleSection(el.querySelector('[data-row="userCount"]'), settings.splitCount);
+          syncRoleLabels(true);
         }
-        if (['countReasoning', 'countHidden', 'splitCount', 'userReasoning', 'userHidden'].includes(key)) { recountAll(); return; }
+        // 重算放到动画开始之后，避免和过渡抢主线程
+        if (['countReasoning', 'countHidden', 'splitCount', 'userReasoning', 'userHidden'].includes(key)) { setTimeout(recountAll, 60); return; }
         if (key === 'hideNative') { syncNativeHidden(); return; }
         if (key === 'globalPos') toggleSection(el.querySelector('[data-row="splitRole"]'), settings.globalPos);
         // 切换位置规则后，所有楼层按新规则重新摆
@@ -1034,15 +1047,25 @@ $(() => {
     el.querySelector('[data-section="pos"]').hidden = isFollow();
     el.querySelectorAll('.ic-switch').forEach((sw) => sw.setAttribute('aria-checked', String(!!settings[sw.dataset.key])));
     el.querySelector('[data-row="splitRole"]').hidden = !settings.globalPos;
-    el.querySelectorAll('[data-row="userCount"]').forEach((n) => { n.hidden = !settings.splitCount; });
+    el.querySelector('[data-row="userCount"]').hidden = !settings.splitCount;
     syncRoleLabels();
   }
 
   // 分开设置时，上面那组开关前面加"角色 · "，和下面"用户 · "那组对应
-  function syncRoleLabels() {
-    getSettingsEl().querySelectorAll('[data-role-label]').forEach((n) => {
-      const base = n.dataset.base || (n.dataset.base = n.textContent);
-      n.textContent = settings.splitCount ? n.dataset.roleLabel + base : base;
+  // 动画：前缀出现 / 消失时，后面的文字用 FLIP 从原位置弹簧滑到新位置，前缀本身淡入并从左侧滑进来
+  function syncRoleLabels(animate = false) {
+    getSettingsEl().querySelectorAll('.ic-lbl').forEach((lbl) => {
+      const prefix = lbl.querySelector('.ic-prefix');
+      const text = lbl.querySelector('.ic-text');
+      const before = animate ? text.getBoundingClientRect().left : 0;
+      prefix.hidden = !settings.splitCount;
+      if (!animate) return;
+      const dx = before - text.getBoundingClientRect().left;
+      const opts = { duration: 560, easing: SPRING_SOFT };
+      if (Math.abs(dx) > 0.5) text.animate([{ transform: `translateX(${dx}px)` }, { transform: 'none' }], opts);
+      if (settings.splitCount) {
+        prefix.animate([{ opacity: 0, transform: 'translateX(-8px)' }, { opacity: 1, transform: 'none' }], opts);
+      }
     });
   }
 
