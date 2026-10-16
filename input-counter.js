@@ -1,11 +1,13 @@
 // 计字簿：输入框实时 Token + 字数，以及每个楼层的 Token + 字数
 // 作者：时鸢
+// 版本：1.0.1
 // 运行环境：酒馆助手（Tavern Helper）脚本。脚本跑在 iframe 里，UI 挂在父文档（酒馆主页面）上。
 // 不改动酒馆源码，只读输入框和聊天记录的内容，用酒馆自己的分词器算 token。
 $(() => {
   const mainWin = (() => { try { return window.parent && window.parent.document ? window.parent : window; } catch (e) { return window; } })();
   const mainDoc = mainWin.document;
 
+  const VERSION = '1.0.1';
   const SCRIPT_ID = 'input-counter';
   const BUTTON_NAME = '计字簿';
   const LS_ENABLED = `${SCRIPT_ID}:enabled`;
@@ -606,20 +608,47 @@ $(() => {
   // body：正文，用来算字数；tok：思维链 + 正文，用来算 token。
   // 酒馆自带的楼层 token 就是 (extra.reasoning || '') + mes 一起算的，这里保持同一口径，数字才对得上。
   // 设置里可以关掉思维链、关掉隐藏内容（关掉后改用页面上实际显示的文字）
+  // 思维链有两种存法：
+  //   1) 酒馆自带的推理功能，存在 extra.reasoning 里（和正文分开）；
+  //   2) 写在正文里的标签，比如 <thinking>…</thinking>，通常再用正则隐藏。很多预设是这种。
+  // "计入思维链"关闭时两种都要去掉，否则第 2 种会被当成正文一直算进去。
+  const REASONING_TAGS = 'think|thinking|reasoning|thought|thoughts|cot|analysis';
+  const REASONING_BLOCK_RE = new RegExp(`<(${REASONING_TAGS})\\b[^>]*>[\\s\\S]*?<\\/\\1\\s*>`, 'gi');
+  const REASONING_OPEN_RE = new RegExp(`<(${REASONING_TAGS})\\b[^>]*>[\\s\\S]*$`, 'i'); // 流式输出中还没闭合的
+  const stripReasoningTags = (text) => text.replace(REASONING_BLOCK_RE, '').replace(REASONING_OPEN_RE, '');
+
+  // 页面上显示的文字；不计思维链时把显示出来的思维链块（标签元素、折叠块）去掉
+  function shownText(mesEl, withReasoning) {
+    const node = mesEl.querySelector('.mes_text');
+    if (!node) return '';
+    if (withReasoning) return node.innerText || '';
+    const clone = node.cloneNode(true);
+    clone.querySelectorAll(REASONING_TAGS.split('|').join(',')).forEach((n) => n.remove());
+    // 折叠块只去掉标题像思维链的，状态栏之类的折叠块保留
+    clone.querySelectorAll('details').forEach((d) => {
+      if (/思|推理|think|reason|cot/i.test(d.querySelector('summary')?.textContent || '')) d.remove();
+    });
+    return clone.textContent || '';
+  }
+
+  // 设置里可以关掉思维链、关掉隐藏内容（关掉后改用页面上实际显示的文字）
   function getMesParts(mesEl) {
     const id = Number(mesEl.getAttribute('mesid'));
     const msg = getCtx()?.chat?.[id];
-    const shown = () => mesEl.querySelector('.mes_text')?.innerText || '';
     const asUser = settings.splitCount && isUserMes(mesEl);
     const withReasoning = asUser ? settings.userReasoning : settings.countReasoning;
     const withHidden = asUser ? settings.userHidden : settings.countHidden;
-    const body = withHidden && msg && typeof msg.mes === 'string' ? msg.mes : shown();
+    let body;
+    if (withHidden && msg && typeof msg.mes === 'string') body = withReasoning ? msg.mes : stripReasoningTags(msg.mes);
+    else body = shownText(mesEl, withReasoning);
     let reasoning = '';
     if (withReasoning) {
       if (withHidden) reasoning = typeof msg?.extra?.reasoning === 'string' ? msg.extra.reasoning : '';
       else reasoning = mesEl.querySelector('.mes_reasoning')?.innerText || '';
     }
-    return { body, tok: reasoning + body, hasReasoning: !!reasoning };
+    const inline = withReasoning && withHidden && msg && typeof msg.mes === 'string' && REASONING_BLOCK_RE.test(msg.mes);
+    REASONING_BLOCK_RE.lastIndex = 0;
+    return { body, tok: reasoning + body, hasReasoning: !!reasoning || inline };
   }
 
   // 酒馆自带的楼层 Token 显示：脚本开启且设置里选了隐藏时才藏
@@ -912,6 +941,7 @@ $(() => {
               <div class="ic-row" style="padding:0"><button type="button" class="ic-row ic-act" data-act="resetBadge">恢复默认位置</button></div>
             </div>
             <p class="ic-foot">单击：收起 / 展开　·　拖动：移动　·　长按：打开设置</p>
+            <p class="ic-foot" style="text-align:center; margin-top:6px">计字簿 v${VERSION} · 时鸢</p>
           </div>
         </div>
       </div>`;
