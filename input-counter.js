@@ -41,9 +41,11 @@ $(() => {
   //   pos        全局位置 { all, user, char }；perMes 每层独立位置 { '聊天#楼层号': pos }
   //   位置格式   { h: 'left'|'right', x: px, v: 'top'|'bottom', y: px }，贴最近的两条边，楼层高矮不同也不会跑偏
   //   countReasoning  楼层 Token 是否计入思维链（酒馆自带计数是计入的）
+  //   splitCount      统计口径是否角色 / 用户分开；开启后 countReasoning/countHidden 管角色，userReasoning/userHidden 管用户
+  //   以上是第一次导入时的默认值，之后一直用用户自己保存的设置
   //   hideNative      是否隐藏酒馆自带的楼层 Token 显示
   //   countHidden     是否计入隐藏内容（HTML 标签、注释、被正则隐藏的部分、Markdown 符号）；关闭后只算页面上显示出来的文字
-  const DEFAULT_SETTINGS = { mode: 'perFloor', globalPos: true, splitRole: false, countReasoning: true, countHidden: true, hideNative: true, pos: { all: null, user: null, char: null }, perMes: {} };
+  const DEFAULT_SETTINGS = { mode: 'follow', globalPos: true, splitRole: false, countReasoning: true, countHidden: true, splitCount: false, userReasoning: true, userHidden: true, hideNative: false, pos: { all: null, user: null, char: null }, perMes: {} };
   const settings = (() => {
     try {
       const s = JSON.parse(lsGet(LS_SETTINGS) || 'null') || {};
@@ -608,10 +610,13 @@ $(() => {
     const id = Number(mesEl.getAttribute('mesid'));
     const msg = getCtx()?.chat?.[id];
     const shown = () => mesEl.querySelector('.mes_text')?.innerText || '';
-    const body = settings.countHidden && msg && typeof msg.mes === 'string' ? msg.mes : shown();
+    const asUser = settings.splitCount && isUserMes(mesEl);
+    const withReasoning = asUser ? settings.userReasoning : settings.countReasoning;
+    const withHidden = asUser ? settings.userHidden : settings.countHidden;
+    const body = withHidden && msg && typeof msg.mes === 'string' ? msg.mes : shown();
     let reasoning = '';
-    if (settings.countReasoning) {
-      if (settings.countHidden) reasoning = typeof msg?.extra?.reasoning === 'string' ? msg.extra.reasoning : '';
+    if (withReasoning) {
+      if (withHidden) reasoning = typeof msg?.extra?.reasoning === 'string' ? msg.extra.reasoning : '';
       else reasoning = mesEl.querySelector('.mes_reasoning')?.innerText || '';
     }
     return { body, tok: reasoning + body, hasReasoning: !!reasoning };
@@ -873,10 +878,13 @@ $(() => {
           <div class="ic-section">
             <div class="ic-label">统计口径</div>
             <div class="ic-card">
-              <div class="ic-row"><span>计入思维链</span><button type="button" class="ic-switch" role="switch" data-key="countReasoning"></button></div>
-              <div class="ic-row"><span>计入隐藏内容</span><button type="button" class="ic-switch" role="switch" data-key="countHidden"></button></div>
+              <div class="ic-row"><span data-role-label="角色 · ">计入思维链</span><button type="button" class="ic-switch" role="switch" data-key="countReasoning"></button></div>
+              <div class="ic-row"><span data-role-label="角色 · ">计入隐藏内容</span><button type="button" class="ic-switch" role="switch" data-key="countHidden"></button></div>
+              <div class="ic-row"><span>角色与用户分别设置</span><button type="button" class="ic-switch" role="switch" data-key="splitCount"></button></div>
+              <div class="ic-row ic-sub" data-row="userCount"><span>用户 · 计入思维链</span><button type="button" class="ic-switch" role="switch" data-key="userReasoning"></button></div>
+              <div class="ic-row ic-sub" data-row="userCount"><span>用户 · 计入隐藏内容</span><button type="button" class="ic-switch" role="switch" data-key="userHidden"></button></div>
             </div>
-            <p class="ic-foot">计入思维链：开启时楼层 Token 与酒馆自带计数一致。<br>计入隐藏内容：关闭后仅统计页面上显示的文字，不计 HTML 标签、注释、被正则隐藏的内容及 Markdown 符号。输入框始终按原文统计。</p>
+            <p class="ic-foot">计入思维链：开启时楼层 Token 与酒馆自带计数一致。<br>计入隐藏内容：关闭后仅统计页面上显示的文字，不计 HTML 标签、注释、被正则隐藏的内容及 Markdown 符号。<br>角色与用户分别设置：开启后角色消息和用户消息各用一组开关；关闭时共用上面一组。输入框始终按原文统计。</p>
           </div>
 
           <div class="ic-section">
@@ -903,7 +911,11 @@ $(() => {
         settings[key] = !settings[key];
         saveSettings();
         sw.setAttribute('aria-checked', String(settings[key]));
-        if (key === 'countReasoning' || key === 'countHidden') { recountAll(); return; }
+        if (key === 'splitCount') {
+          el.querySelectorAll('[data-row="userCount"]').forEach((n) => toggleSection(n, settings.splitCount));
+          syncRoleLabels();
+        }
+        if (['countReasoning', 'countHidden', 'splitCount', 'userReasoning', 'userHidden'].includes(key)) { recountAll(); return; }
         if (key === 'hideNative') { syncNativeHidden(); return; }
         if (key === 'globalPos') toggleSection(el.querySelector('[data-row="splitRole"]'), settings.globalPos);
         // 切换位置规则后，所有楼层按新规则重新摆
@@ -973,6 +985,16 @@ $(() => {
     el.querySelector('[data-section="pos"]').hidden = isFollow();
     el.querySelectorAll('.ic-switch').forEach((sw) => sw.setAttribute('aria-checked', String(!!settings[sw.dataset.key])));
     el.querySelector('[data-row="splitRole"]').hidden = !settings.globalPos;
+    el.querySelectorAll('[data-row="userCount"]').forEach((n) => { n.hidden = !settings.splitCount; });
+    syncRoleLabels();
+  }
+
+  // 分开设置时，上面那组开关前面加"角色 · "，和下面"用户 · "那组对应
+  function syncRoleLabels() {
+    getSettingsEl().querySelectorAll('[data-role-label]').forEach((n) => {
+      const base = n.dataset.base || (n.dataset.base = n.textContent);
+      n.textContent = settings.splitCount ? n.dataset.roleLabel + base : base;
+    });
   }
 
   let settingsCloseTimer = null;
