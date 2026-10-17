@@ -354,18 +354,20 @@ $(() => {
       #${SETTINGS_ID} .ic-prefix[hidden] { display: none; }
       #${SETTINGS_ID} .ic-prefix, #${SETTINGS_ID} .ic-tag { opacity: 0.6; white-space: pre; }
       /* 统计口径矩阵：行 = 思维链 / 隐藏内容，列 = Token / 字数 */
+      /* 思维链 / 隐藏内容这组开关放在卡片里一块颜色稍深的圆角小卡上，靠色块区分分组，不用分隔线。
+         小卡左右各内缩 8px，行内再留 6px，文字和开关正好和外面的行对齐（左 14px，开关中心对齐最右一列）。 */
+      #${SETTINGS_ID} .ic-matrix {
+        margin: 2px 8px 8px; padding: 2px 0; border-radius: 12px;
+        background: rgba(127, 127, 127, 0.12);
+      }
       #${SETTINGS_ID} .ic-mrow {
         display: grid; grid-template-columns: 1fr 64px 64px; align-items: center; justify-items: center;
-        min-height: 46px; padding: 0 14px; box-sizing: border-box;
+        min-height: 44px; padding: 0 6px; box-sizing: border-box;
       }
       #${SETTINGS_ID} .ic-mrow > span:first-child { justify-self: start; }
-      #${SETTINGS_ID} .ic-mrow + .ic-mrow { box-shadow: inset 0 1px 0 rgba(127, 127, 127, 0.18); }
-      /* 表头（角色 / 用户、Token / 字数）当作下面开关的小标题：上方留白、贴近下一行，和下一行之间不画分隔线 */
-      #${SETTINGS_ID} .ic-mhead { min-height: 0; padding-top: 14px; padding-bottom: 8px; align-items: end; font-size: 12px; line-height: 1.2; }
-      #${SETTINGS_ID} .ic-mhead + .ic-mrow { box-shadow: none; }
+      /* 表头（角色 / 用户、Token / 字数）：小卡顶部的一行小字 */
+      #${SETTINGS_ID} .ic-mhead { min-height: 0; padding-top: 10px; padding-bottom: 2px; align-items: end; font-size: 12px; line-height: 1.2; }
       #${SETTINGS_ID} .ic-mhead[hidden] { display: none; }
-      #${SETTINGS_ID} .ic-row + .ic-matrix { box-shadow: inset 0 1px 0 rgba(127, 127, 127, 0.18); }
-      #${SETTINGS_ID} .ic-mhead[hidden] + .ic-mrow { box-shadow: none; }
       /* 不分别控制：每行只有一个开关，靠右（用 translateX 挪到最右一列）；字数开关和列名隐藏。
          分别控制：这个开关弹簧滑回 Token 列，字数开关和列名随后淡入弹出。关闭时顺序相反。 */
       #${SETTINGS_ID} .ic-mhead .ic-hl { opacity: 0; transition: opacity 140ms ease-in; }
@@ -386,9 +388,8 @@ $(() => {
         transition: transform 560ms ${SPRING_SOFT} 80ms, opacity 220ms ease-out 80ms, background-color 260ms ease;
       }
       #${SETTINGS_ID} .ic-mrow > span:first-child { grid-row: 1; grid-column: 1; }
-      #${SETTINGS_ID} .ic-matrix + .ic-row { box-shadow: inset 0 1px 0 rgba(127, 127, 127, 0.18); }
       /* 用户那一组：组本身不做动画，各行依次弹入 */
-      #${SETTINGS_ID} .ic-rowgroup { box-shadow: inset 0 1px 0 rgba(127, 127, 127, 0.18); }
+      #${SETTINGS_ID} .ic-rowgroup { box-shadow: none; }
       #${SETTINGS_ID} .ic-rowgroup[hidden] { display: none; }
       #${SETTINGS_ID} .ic-rowgroup.ic-in { animation: none; }
       #${SETTINGS_ID} .ic-rowgroup.ic-in .ic-mrow { animation: ic-spring-in 620ms ${SPRING_SOFT} both; }
