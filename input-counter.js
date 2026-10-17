@@ -42,12 +42,13 @@ $(() => {
   //   splitRole  （globalPos 打开时）角色和用户分开记位置
   //   pos        全局位置 { all, user, char }；perMes 每层独立位置 { '聊天#楼层号': pos }
   //   位置格式   { h: 'left'|'right', x: px, v: 'top'|'bottom', y: px }，贴最近的两条边，楼层高矮不同也不会跑偏
-  //   countReasoning  楼层 Token 是否计入思维链（酒馆自带计数是计入的）
-  //   splitCount      统计口径是否角色 / 用户分开；开启后 countReasoning/countHidden 管角色，userReasoning/userHidden 管用户
+  //   统计口径（每一项都可以分别选择计入 Token、计入字数）：
+  //     cReasonTok / cReasonWords   思维链：酒馆自带思维链 + 正文里 <think> 等标签内的内容
+  //     cHiddenTok / cHiddenWords   隐藏内容：HTML 标签、注释、CSS，以及被正则隐藏、页面上看不到的文字
+  //     u* 同上，"角色与用户分别设置"（splitCount）开启时用于用户消息，c* 用于角色消息；关闭时全部用 c*
   //   以上是第一次导入时的默认值，之后一直用用户自己保存的设置
   //   hideNative      是否隐藏酒馆自带的楼层 Token 显示
-  //   countHidden     是否计入隐藏内容（HTML 标签、注释、被正则隐藏的部分、Markdown 符号）；关闭后只算页面上显示出来的文字
-  const DEFAULT_SETTINGS = { mode: 'follow', globalPos: true, splitRole: false, countReasoning: true, countHidden: true, splitCount: false, userReasoning: true, userHidden: true, hideNative: false, pos: { all: null, user: null, char: null }, perMes: {} };
+  const DEFAULT_SETTINGS = { mode: 'follow', globalPos: true, splitRole: false, cReasonTok: true, cReasonWords: true, cHiddenTok: true, cHiddenWords: false, splitCount: false, uReasonTok: true, uReasonWords: true, uHiddenTok: true, uHiddenWords: false, hideNative: false, pos: { all: null, user: null, char: null }, perMes: {} };
   const settings = (() => {
     try {
       const s = JSON.parse(lsGet(LS_SETTINGS) || 'null') || {};
@@ -345,12 +346,23 @@ $(() => {
       #${SETTINGS_ID} .ic-lbl > span { display: inline-block; }
       #${SETTINGS_ID} .ic-prefix[hidden] { display: none; }
       #${SETTINGS_ID} .ic-prefix, #${SETTINGS_ID} .ic-tag { opacity: 0.6; white-space: pre; }
-      /* 用户那两行是一组：组本身不做动画，两行依次弹入 */
+      /* 统计口径矩阵：行 = 思维链 / 隐藏内容，列 = Token / 字数 */
+      #${SETTINGS_ID} .ic-mrow {
+        display: grid; grid-template-columns: 1fr 64px 64px; align-items: center; justify-items: center;
+        min-height: 46px; padding: 0 14px; box-sizing: border-box;
+      }
+      #${SETTINGS_ID} .ic-mrow > span:first-child { justify-self: start; }
+      #${SETTINGS_ID} .ic-mrow + .ic-mrow { box-shadow: inset 0 1px 0 rgba(127, 127, 127, 0.18); }
+      #${SETTINGS_ID} .ic-mhead { min-height: 32px; font-size: 12px; }
+      #${SETTINGS_ID} .ic-mhead > span:not(:first-child) { opacity: 0.55; }
+      #${SETTINGS_ID} .ic-matrix + .ic-row { box-shadow: inset 0 1px 0 rgba(127, 127, 127, 0.18); }
+      /* 用户那一组：组本身不做动画，各行依次弹入 */
       #${SETTINGS_ID} .ic-rowgroup { box-shadow: inset 0 1px 0 rgba(127, 127, 127, 0.18); }
       #${SETTINGS_ID} .ic-rowgroup[hidden] { display: none; }
       #${SETTINGS_ID} .ic-rowgroup.ic-in { animation: none; }
-      #${SETTINGS_ID} .ic-rowgroup.ic-in > .ic-row { animation: ic-spring-in 620ms ${SPRING_SOFT} both; }
-      #${SETTINGS_ID} .ic-rowgroup.ic-in > .ic-row:nth-child(2) { animation-delay: 60ms; }
+      #${SETTINGS_ID} .ic-rowgroup.ic-in .ic-mrow { animation: ic-spring-in 620ms ${SPRING_SOFT} both; }
+      #${SETTINGS_ID} .ic-rowgroup.ic-in .ic-mrow:nth-child(2) { animation-delay: 50ms; }
+      #${SETTINGS_ID} .ic-rowgroup.ic-in .ic-mrow:nth-child(3) { animation-delay: 100ms; }
       #${SETTINGS_ID} .ic-row.ic-sub > span:first-child::before { content: '└'; margin-right: 6px; opacity: 0.35; }
       #${SETTINGS_ID} .ic-act {
         width: 100%; border: 0; background: none; text-align: left; font-size: 14px;
@@ -647,18 +659,16 @@ $(() => {
     return text;
   }
 
-  // 统计口径：
-  //   正文   = 消息去掉思维链后的部分；"计入隐藏内容"关闭时只取页面上显示出来的正文
-  //   思维链 = extra.reasoning + 正文里的思维链标签块
-  //   字数   = 正文的字数（不含思维链）
-  //   Token  = 正文 +（"计入思维链"开启时）思维链
-  // 所以"计入思维链"只影响 Token；"计入隐藏内容"同时影响 Token 和字数。
+  // 统计口径：一条消息拆成四份
+  //   正文原文 / 正文显示文字（不含思维链）
+  //   思维链原文 / 思维链去掉代码后的文字
+  // Token 和字数各自按开关从里面挑：
+  //   计入思维链 → 加上思维链；计入隐藏内容 → 用原文，否则用显示出来的文字
   function getMesParts(mesEl) {
     const id = Number(mesEl.getAttribute('mesid'));
     const msg = getCtx()?.chat?.[id];
-    const asUser = settings.splitCount && isUserMes(mesEl);
-    const withReasoning = asUser ? settings.userReasoning : settings.countReasoning;
-    const withHidden = asUser ? settings.userHidden : settings.countHidden;
+    const p = settings.splitCount && isUserMes(mesEl) ? 'u' : 'c';
+    const flag = (k) => !!settings[p + k];
     const raw = msg && typeof msg.mes === 'string' ? msg.mes : null;
 
     let inline = '';
@@ -667,14 +677,20 @@ $(() => {
       const open = raw.replace(REASONING_BLOCK_RE, '').match(REASONING_OPEN_RE); // 流式输出中还没闭合的
       inline = [...blocks, open?.[0]].filter(Boolean).join('');
     }
-    let reasoning = (typeof msg?.extra?.reasoning === 'string' ? msg.extra.reasoning : '') + inline;
-    if (!raw && !reasoning) reasoning = mesEl.querySelector('.mes_reasoning')?.textContent || '';
+    let reasonRaw = (typeof msg?.extra?.reasoning === 'string' ? msg.extra.reasoning : '') + inline;
+    if (!raw && !reasonRaw) reasonRaw = mesEl.querySelector('.mes_reasoning')?.textContent || '';
 
-    const body = withHidden && raw != null ? stripReasoningTags(raw) : shownBody(mesEl);
-    if (!withHidden) reasoning = stripMarkup(reasoning);
+    // 显示文字要读页面（innerText 会触发排版），只在用得到时才读
+    let shown = null;
+    const bodyShown = () => (shown ??= shownBody(mesEl));
+    const bodyOf = (hidden) => (hidden && raw != null ? stripReasoningTags(raw) : bodyShown());
+    const reasonOf = (hidden) => (hidden ? reasonRaw : stripMarkup(reasonRaw));
+
     // 和酒馆自带计数一样直接拼接（reasoning + mes），数字才对得上
-    const counted = withReasoning ? reasoning : '';
-    return { body, tok: counted + body, hasReasoning: !!counted.trim() };
+    const tokReason = flag('ReasonTok') ? reasonOf(flag('HiddenTok')) : '';
+    const tok = tokReason + bodyOf(flag('HiddenTok'));
+    const words = (flag('ReasonWords') ? reasonOf(flag('HiddenWords')) : '') + bodyOf(flag('HiddenWords'));
+    return { body: words, tok, hasReasoning: !!tokReason.trim() };
   }
 
   // 酒馆自带的楼层 Token 显示：脚本开启且设置里选了隐藏时才藏
@@ -952,15 +968,21 @@ $(() => {
           <div class="ic-section">
             <div class="ic-label">统计口径</div>
             <div class="ic-card">
-              <div class="ic-row"><span class="ic-lbl"><span class="ic-prefix">角色 · </span><span class="ic-text">计入思维链</span></span><button type="button" class="ic-switch" role="switch" data-key="countReasoning"></button></div>
-              <div class="ic-row"><span class="ic-lbl"><span class="ic-prefix">角色 · </span><span class="ic-text">计入隐藏内容</span></span><button type="button" class="ic-switch" role="switch" data-key="countHidden"></button></div>
-              <div class="ic-row"><span>角色与用户分别设置</span><button type="button" class="ic-switch" role="switch" data-key="splitCount"></button></div>
+              <div class="ic-matrix">
+                <div class="ic-mrow ic-mhead"><span class="ic-lbl"><span class="ic-prefix">角色</span><span class="ic-text"></span></span><span>Token</span><span>字数</span></div>
+                <div class="ic-mrow"><span>思维链</span><button type="button" class="ic-switch" role="switch" data-key="cReasonTok" aria-label="思维链计入 Token"></button><button type="button" class="ic-switch" role="switch" data-key="cReasonWords" aria-label="思维链计入字数"></button></div>
+                <div class="ic-mrow"><span>隐藏内容</span><button type="button" class="ic-switch" role="switch" data-key="cHiddenTok" aria-label="隐藏内容计入 Token"></button><button type="button" class="ic-switch" role="switch" data-key="cHiddenWords" aria-label="隐藏内容计入字数"></button></div>
+              </div>
+              <div class="ic-row" style="padding-right:22px"><span>角色与用户分别设置</span><button type="button" class="ic-switch" role="switch" data-key="splitCount"></button></div>
               <div class="ic-rowgroup" data-row="userCount">
-                <div class="ic-row ic-sub"><span class="ic-lbl"><span class="ic-tag">用户 · </span><span>计入思维链</span></span><button type="button" class="ic-switch" role="switch" data-key="userReasoning"></button></div>
-                <div class="ic-row ic-sub"><span class="ic-lbl"><span class="ic-tag">用户 · </span><span>计入隐藏内容</span></span><button type="button" class="ic-switch" role="switch" data-key="userHidden"></button></div>
+              <div class="ic-matrix">
+                <div class="ic-mrow ic-mhead"><span class="ic-lbl"><span class="ic-tag">用户</span></span><span>Token</span><span>字数</span></div>
+                <div class="ic-mrow"><span>思维链</span><button type="button" class="ic-switch" role="switch" data-key="uReasonTok" aria-label="思维链计入 Token"></button><button type="button" class="ic-switch" role="switch" data-key="uReasonWords" aria-label="思维链计入字数"></button></div>
+                <div class="ic-mrow"><span>隐藏内容</span><button type="button" class="ic-switch" role="switch" data-key="uHiddenTok" aria-label="隐藏内容计入 Token"></button><button type="button" class="ic-switch" role="switch" data-key="uHiddenWords" aria-label="隐藏内容计入字数"></button></div>
+              </div>
               </div>
             </div>
-            <p class="ic-foot">计入思维链：只影响 Token，字数始终只统计正文；开启时与酒馆自带计数一致。<br>计入隐藏内容：同时影响 Token 和字数；关闭后只统计页面上显示的文字，不计 HTML 代码、注释、被隐藏的内容及 Markdown 符号。<br>角色与用户分别设置：开启后角色消息和用户消息各用一组开关；关闭时共用上面一组。输入框始终按原文统计。</p>
+            <p class="ic-foot">分别选择思维链、隐藏内容是否计入 Token 和字数。<br>思维链：酒馆自带的思维链，以及正文中 &lt;think&gt; 等标签内的内容。<br>隐藏内容：HTML 标签、注释、CSS 代码，以及被正则隐藏、页面上看不到的文字。<br>思维链与隐藏内容的 Token 都开启时，与酒馆自带计数一致。输入框始终按原文统计。</p>
           </div>
 
           <div class="ic-section">
@@ -994,7 +1016,7 @@ $(() => {
           syncRoleLabels(true);
         }
         // 重算放到动画开始之后，避免和过渡抢主线程
-        if (['countReasoning', 'countHidden', 'splitCount', 'userReasoning', 'userHidden'].includes(key)) { setTimeout(recountAll, 60); return; }
+        if (key === 'splitCount' || /^[cu](Reason|Hidden)(Tok|Words)$/.test(key)) { setTimeout(recountAll, 60); return; }
         if (key === 'hideNative') { syncNativeHidden(); return; }
         if (key === 'globalPos') toggleSection(el.querySelector('[data-row="splitRole"]'), settings.globalPos);
         // 切换位置规则后，所有楼层按新规则重新摆
@@ -1074,12 +1096,12 @@ $(() => {
     getSettingsEl().querySelectorAll('.ic-prefix').forEach((prefix) => {
       const lbl = prefix.parentElement;
       const text = lbl.querySelector('.ic-text');
-      const before = animate ? text.getBoundingClientRect().left : 0;
+      const before = animate && text ? text.getBoundingClientRect().left : 0;
       prefix.hidden = !settings.splitCount;
       if (!animate) return;
-      const dx = before - text.getBoundingClientRect().left;
+      const dx = text ? before - text.getBoundingClientRect().left : 0;
       const opts = { duration: 560, easing: SPRING_SOFT };
-      if (Math.abs(dx) > 0.5) text.animate([{ transform: `translateX(${dx}px)` }, { transform: 'none' }], opts);
+      if (text && Math.abs(dx) > 0.5) text.animate([{ transform: `translateX(${dx}px)` }, { transform: 'none' }], opts);
       if (settings.splitCount) {
         // 淡入的终点用 CSS 里的浅色透明度，而不是 1，否则动画期间是深色、结束才跳回浅色
         const target = Number(mainWin.getComputedStyle(prefix).opacity) || 0.6;
