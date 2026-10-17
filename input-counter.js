@@ -340,7 +340,15 @@ $(() => {
       #${SETTINGS_ID} .ic-section { display: flex; flex-direction: column; gap: 6px; }
       #${SETTINGS_ID} .ic-section[hidden] { display: none; }
       #${SETTINGS_ID} .ic-label { font-size: 12px; opacity: 0.55; letter-spacing: 0.06em; padding-left: 4px; }
-      #${SETTINGS_ID} .ic-card { border-radius: 14px; background: rgba(127, 127, 127, 0.1); overflow: hidden; }
+      /* 卡片底色单独一层（::before），内容增减时只对底色做 scaleY 弹簧过渡，内容做位移 */
+      #${SETTINGS_ID} .ic-card { position: relative; isolation: isolate; border-radius: 14px; }
+      #${SETTINGS_ID} .ic-card::before {
+        content: ''; position: absolute; inset: 0; z-index: -1; border-radius: 14px;
+        background: rgba(127, 127, 127, 0.1); transform-origin: 50% 0;
+      }
+      #${SETTINGS_ID} .ic-card > .ic-row:first-child .ic-act { border-radius: 14px 14px 0 0; }
+      #${SETTINGS_ID} .ic-card > .ic-row:last-child .ic-act { border-radius: 0 0 14px 14px; }
+      #${SETTINGS_ID} .ic-card > .ic-row:only-child .ic-act { border-radius: 14px; }
       #${SETTINGS_ID} .ic-foot { margin: 0; padding: 0 4px; font-size: 12px; line-height: 1.55; opacity: 0.55; }
       #${SETTINGS_ID} .ic-foot[hidden] { display: none; }
       #${SETTINGS_ID} .ic-row {
@@ -356,17 +364,29 @@ $(() => {
       /* 统计口径矩阵：行 = 思维链 / 隐藏内容，列 = Token / 字数 */
       /* 思维链 / 隐藏内容这组开关放在卡片里一块颜色稍深的圆角小卡上，靠色块区分分组，不用分隔线。
          小卡左右各内缩 8px，行内再留 6px，文字和开关正好和外面的行对齐（左 14px，开关中心对齐最右一列）。 */
-      #${SETTINGS_ID} .ic-matrix {
-        margin: 2px 8px 8px; padding: 2px 0; border-radius: 12px;
-        background: rgba(127, 127, 127, 0.12);
-      }
+      #${SETTINGS_ID} .ic-matrix { margin: 2px 8px 8px; }
+      #${SETTINGS_ID} .ic-mtile { padding: 2px 0; border-radius: 12px; background: rgba(127, 127, 127, 0.12); }
       #${SETTINGS_ID} .ic-mrow {
         display: grid; grid-template-columns: 1fr 64px 64px; align-items: center; justify-items: center;
         min-height: 44px; padding: 0 6px; box-sizing: border-box;
       }
       #${SETTINGS_ID} .ic-mrow > span:first-child { justify-self: start; }
-      /* 表头（角色 / 用户、Token / 字数）：小卡顶部的一行小字 */
-      #${SETTINGS_ID} .ic-mhead { min-height: 0; padding-top: 10px; padding-bottom: 2px; align-items: end; font-size: 12px; line-height: 1.2; }
+      /* 表头（角色 / 用户、Token / 字数）：单独一条大圆角胶囊，和下面的开关小卡分开。
+         胶囊底色用 clip-path 裁出可见范围：只有 Token/字数 时是右侧小胶囊，
+         出现"角色 / 用户"时用弹簧往左延伸成长胶囊；只有"角色 / 用户"时是左侧小胶囊。 */
+      #${SETTINGS_ID} .ic-mhead {
+        position: relative; isolation: isolate; min-height: 28px; margin-bottom: 6px;
+        align-items: center; font-size: 12px; line-height: 1.2;
+      }
+      #${SETTINGS_ID} .ic-mhead::before {
+        content: ''; position: absolute; inset: 0; z-index: -1; border-radius: 999px;
+        background: rgba(127, 127, 127, 0.14);
+        clip-path: inset(0 0 0 calc(100% - 140px) round 999px);
+        transition: clip-path 600ms ${SPRING_SOFT};
+      }
+      #${SETTINGS_ID}.ic-role.ic-tw .ic-mhead::before { clip-path: inset(0 0 0 0 round 999px); }
+      #${SETTINGS_ID}.ic-role:not(.ic-tw) .ic-mhead::before { clip-path: inset(0 calc(100% - 64px) 0 0 round 999px); }
+      #${SETTINGS_ID} .ic-mhead > span:first-child { padding-left: 8px; }
       #${SETTINGS_ID} .ic-mhead[hidden] { display: none; }
       /* 不分别控制：每行只有一个开关，靠右（用 translateX 挪到最右一列）；字数开关和列名隐藏。
          分别控制：这个开关弹簧滑回 Token 列，字数开关和列名随后淡入弹出。关闭时顺序相反。 */
@@ -393,8 +413,8 @@ $(() => {
       #${SETTINGS_ID} .ic-rowgroup[hidden] { display: none; }
       #${SETTINGS_ID} .ic-rowgroup.ic-in { animation: none; }
       #${SETTINGS_ID} .ic-rowgroup.ic-in .ic-mrow { animation: ic-spring-in 620ms ${SPRING_SOFT} both; }
-      #${SETTINGS_ID} .ic-rowgroup.ic-in .ic-mrow:nth-child(2) { animation-delay: 50ms; }
-      #${SETTINGS_ID} .ic-rowgroup.ic-in .ic-mrow:nth-child(3) { animation-delay: 100ms; }
+      #${SETTINGS_ID} .ic-rowgroup.ic-in .ic-mtile .ic-mrow:nth-child(1) { animation-delay: 50ms; }
+      #${SETTINGS_ID} .ic-rowgroup.ic-in .ic-mtile .ic-mrow:nth-child(2) { animation-delay: 100ms; }
       #${SETTINGS_ID} .ic-row.ic-sub > span:first-child::before { content: '└'; margin-right: 6px; opacity: 0.35; }
       #${SETTINGS_ID} .ic-act {
         width: 100%; border: 0; background: none; text-align: left; font-size: 14px;
@@ -1020,15 +1040,19 @@ $(() => {
               <div class="ic-row" style="padding-right:22px"><span>分别控制 Token 和字数</span><button type="button" class="ic-switch" role="switch" data-key="splitTW"></button></div>
               <div class="ic-matrix" data-who="c">
                 <div class="ic-mrow ic-mhead"><span class="ic-lbl"><span class="ic-prefix">角色</span><span class="ic-text"></span></span><span class="ic-hl">Token</span><span class="ic-hl">字数</span></div>
-                <div class="ic-mrow"><span>思维链</span><button type="button" class="ic-switch ic-main" role="switch" data-main="Reason" aria-label="思维链"></button><button type="button" class="ic-switch ic-words" role="switch" data-words="Reason" aria-label="思维链计入字数"></button></div>
-                <div class="ic-mrow"><span>隐藏内容</span><button type="button" class="ic-switch ic-main" role="switch" data-main="Hidden" aria-label="隐藏内容"></button><button type="button" class="ic-switch ic-words" role="switch" data-words="Hidden" aria-label="隐藏内容计入字数"></button></div>
+                <div class="ic-mtile">
+                  <div class="ic-mrow"><span>思维链</span><button type="button" class="ic-switch ic-main" role="switch" data-main="Reason" aria-label="思维链"></button><button type="button" class="ic-switch ic-words" role="switch" data-words="Reason" aria-label="思维链计入字数"></button></div>
+                  <div class="ic-mrow"><span>隐藏内容</span><button type="button" class="ic-switch ic-main" role="switch" data-main="Hidden" aria-label="隐藏内容"></button><button type="button" class="ic-switch ic-words" role="switch" data-words="Hidden" aria-label="隐藏内容计入字数"></button></div>
+                </div>
               </div>
               <div class="ic-row" style="padding-right:22px"><span>角色与用户分别设置</span><button type="button" class="ic-switch" role="switch" data-key="splitCount"></button></div>
               <div class="ic-rowgroup" data-row="userCount">
               <div class="ic-matrix" data-who="u">
                 <div class="ic-mrow ic-mhead"><span class="ic-lbl"><span class="ic-tag">用户</span></span><span class="ic-hl">Token</span><span class="ic-hl">字数</span></div>
-                <div class="ic-mrow"><span>思维链</span><button type="button" class="ic-switch ic-main" role="switch" data-main="Reason" aria-label="思维链"></button><button type="button" class="ic-switch ic-words" role="switch" data-words="Reason" aria-label="思维链计入字数"></button></div>
-                <div class="ic-mrow"><span>隐藏内容</span><button type="button" class="ic-switch ic-main" role="switch" data-main="Hidden" aria-label="隐藏内容"></button><button type="button" class="ic-switch ic-words" role="switch" data-words="Hidden" aria-label="隐藏内容计入字数"></button></div>
+                <div class="ic-mtile">
+                  <div class="ic-mrow"><span>思维链</span><button type="button" class="ic-switch ic-main" role="switch" data-main="Reason" aria-label="思维链"></button><button type="button" class="ic-switch ic-words" role="switch" data-words="Reason" aria-label="思维链计入字数"></button></div>
+                  <div class="ic-mrow"><span>隐藏内容</span><button type="button" class="ic-switch ic-main" role="switch" data-main="Hidden" aria-label="隐藏内容"></button><button type="button" class="ic-switch ic-words" role="switch" data-words="Hidden" aria-label="隐藏内容计入字数"></button></div>
+                </div>
               </div>
               </div>
             </div>
@@ -1067,7 +1091,7 @@ $(() => {
           syncRoleLabels(true);
         }
         // 重算放到动画开始之后，避免和过渡抢主线程
-        if (key === 'splitCount') syncMatrixHeads(true);
+        if (key === 'splitCount') { el.classList.toggle('ic-role', !!settings.splitCount); syncMatrixHeads(true); }
         if (key === 'splitCount' || /^[cu](Reason|Hidden)(Tok|Words)?$/.test(key)) { setTimeout(recountAll, 60); return; }
         if (key === 'hideNative') { syncNativeHidden(); return; }
         if (key === 'globalPos') toggleSection(el.querySelector('[data-row="splitRole"]'), settings.globalPos);
@@ -1091,23 +1115,33 @@ $(() => {
 
   // 浮窗内容增减时的弹簧过渡（FLIP）：
   // 先记下背景和各分区的位置 → 改内容 → 背景从旧尺寸 translateY + scaleY 弹到新尺寸，分区从旧位置 translateY 弹到新位置。
+  // 分区按绝对位置算位移；分区里面的卡片、行、表头等按"相对父元素"的位置算位移，
+  // 这样父子各自只动自己那一段，叠加起来正好，不会重复位移。卡片底色同样做 scaleY 过渡。
   function resizeSheet(mutate) {
     const el = getSettingsEl();
     const bg = el.querySelector('.ic-bg');
-    const items = [...el.querySelectorAll('.ic-head, .ic-section:not([hidden])')];
+    const visible = (n) => !n.hidden && n.getClientRects().length > 0;
+    const absItems = [...el.querySelectorAll('.ic-head, .ic-section')].filter(visible);
+    const localItems = [...el.querySelectorAll('.ic-section > *, .ic-card > *, .ic-matrix > *, .ic-rowgroup > *')].filter(visible);
+    const cards = [...el.querySelectorAll('.ic-card')].filter(visible);
+    const localTop = (n) => n.getBoundingClientRect().top - n.parentElement.getBoundingClientRect().top;
     const b0 = bg.getBoundingClientRect();
-    const tops = new Map(items.map((n) => [n, n.getBoundingClientRect().top]));
+    const absTop = new Map(absItems.map((n) => [n, n.getBoundingClientRect().top]));
+    const locTop = new Map(localItems.map((n) => [n, localTop(n)]));
+    const cardH = new Map(cards.map((n) => [n, n.getBoundingClientRect().height]));
     mutate();
     const b1 = bg.getBoundingClientRect();
     if (!b1.height) return;
     const opts = { duration: 640, easing: SPRING_SOFT };
+    const slide = (n, dy) => { if (Math.abs(dy) > 0.5) n.animate([{ transform: `translateY(${dy}px)` }, { transform: 'none' }], opts); };
     if (Math.abs(b0.height - b1.height) > 0.5 || Math.abs(b0.top - b1.top) > 0.5) {
       bg.animate([{ transform: `translateY(${b0.top - b1.top}px) scaleY(${b0.height / b1.height})` }, { transform: 'none' }], opts);
     }
-    tops.forEach((top, n) => {
-      if (!n.isConnected || n.hidden) return;
-      const dy = top - n.getBoundingClientRect().top;
-      if (Math.abs(dy) > 0.5) n.animate([{ transform: `translateY(${dy}px)` }, { transform: 'none' }], opts);
+    absTop.forEach((top, n) => { if (visible(n)) slide(n, top - n.getBoundingClientRect().top); });
+    locTop.forEach((top, n) => { if (visible(n)) slide(n, top - localTop(n)); });
+    cardH.forEach((h, n) => {
+      const h1 = n.getBoundingClientRect().height;
+      if (h1 && Math.abs(h - h1) > 0.5) n.animate([{ transform: `scaleY(${h / h1})` }, { transform: 'none' }], { ...opts, pseudoElement: '::before' });
     });
   }
 
@@ -1176,6 +1210,7 @@ $(() => {
     el.querySelectorAll('[data-note]').forEach((n) => { n.hidden = n.dataset.note !== settings.mode; });
     el.querySelector('[data-section="pos"]').hidden = isFollow();
     el.classList.toggle('ic-tw', !!settings.splitTW);
+    el.classList.toggle('ic-role', !!settings.splitCount);
     el.querySelectorAll('.ic-switch').forEach((sw) => sw.setAttribute('aria-checked', String(!!settings[switchKey(sw)])));
     syncMatrixHeads(false);
     el.querySelector('[data-row="splitRole"]').hidden = !settings.globalPos;
