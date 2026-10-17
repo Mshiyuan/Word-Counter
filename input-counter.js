@@ -1,13 +1,13 @@
 // 计字簿：输入框实时 Token + 字数，以及每个楼层的 Token + 字数
 // 作者：时鸢
-// 版本：1.0.1
+// 版本：1.0.2
 // 运行环境：酒馆助手（Tavern Helper）脚本。脚本跑在 iframe 里，UI 挂在父文档（酒馆主页面）上。
 // 不改动酒馆源码，只读输入框和聊天记录的内容，用酒馆自己的分词器算 token。
 $(() => {
   const mainWin = (() => { try { return window.parent && window.parent.document ? window.parent : window; } catch (e) { return window; } })();
   const mainDoc = mainWin.document;
 
-  const VERSION = '1.0.1';
+  const VERSION = '1.0.2';
   const SCRIPT_ID = 'input-counter';
   const BUTTON_NAME = '计字簿';
   const LS_ENABLED = `${SCRIPT_ID}:enabled`;

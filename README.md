@@ -1,4 +1,4 @@
-# 计字簿（Word-Counter）v1.0.1
+# 计字簿（Word-Counter）v1.0.2
 
 作者：时鸢
 
