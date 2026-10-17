@@ -42,13 +42,16 @@ $(() => {
   //   splitRole  （globalPos 打开时）角色和用户分开记位置
   //   pos        全局位置 { all, user, char }；perMes 每层独立位置 { '聊天#楼层号': pos }
   //   位置格式   { h: 'left'|'right', x: px, v: 'top'|'bottom', y: px }，贴最近的两条边，楼层高矮不同也不会跑偏
-  //   统计口径（每一项都可以分别选择计入 Token、计入字数）：
+  //   统计口径：
+  //     splitTW 关（默认）：每项一个开关 cReason / cHidden
+  //       思维链开 = Token 和字数都计入；隐藏内容开 = 只计入 Token，字数不计；关 = 都不计
+  //     splitTW 开：每项 Token、字数分别控制，用下面这组
   //     cReasonTok / cReasonWords   思维链：酒馆自带思维链 + 正文里 <think> 等标签内的内容
   //     cHiddenTok / cHiddenWords   隐藏内容：HTML 标签、注释、CSS，以及被正则隐藏、页面上看不到的文字
   //     u* 同上，"角色与用户分别设置"（splitCount）开启时用于用户消息，c* 用于角色消息；关闭时全部用 c*
   //   以上是第一次导入时的默认值，之后一直用用户自己保存的设置
   //   hideNative      是否隐藏酒馆自带的楼层 Token 显示
-  const DEFAULT_SETTINGS = { mode: 'follow', globalPos: true, splitRole: false, cReasonTok: true, cReasonWords: true, cHiddenTok: true, cHiddenWords: false, splitCount: false, uReasonTok: true, uReasonWords: true, uHiddenTok: true, uHiddenWords: false, hideNative: false, pos: { all: null, user: null, char: null }, perMes: {} };
+  const DEFAULT_SETTINGS = { mode: 'follow', globalPos: true, splitRole: false, splitTW: false, cReason: true, cHidden: true, uReason: true, uHidden: true, cReasonTok: true, cReasonWords: true, cHiddenTok: true, cHiddenWords: false, splitCount: false, uReasonTok: true, uReasonWords: true, uHiddenTok: true, uHiddenWords: false, hideNative: false, pos: { all: null, user: null, char: null }, perMes: {} };
   const settings = (() => {
     try {
       const s = JSON.parse(lsGet(LS_SETTINGS) || 'null') || {};
@@ -358,7 +361,29 @@ $(() => {
       #${SETTINGS_ID} .ic-mrow > span:first-child { justify-self: start; }
       #${SETTINGS_ID} .ic-mrow + .ic-mrow { box-shadow: inset 0 1px 0 rgba(127, 127, 127, 0.18); }
       #${SETTINGS_ID} .ic-mhead { min-height: 32px; font-size: 12px; }
-      #${SETTINGS_ID} .ic-mhead > span:not(:first-child) { opacity: 0.55; }
+      #${SETTINGS_ID} .ic-mhead[hidden] { display: none; }
+      #${SETTINGS_ID} .ic-row + .ic-matrix { box-shadow: inset 0 1px 0 rgba(127, 127, 127, 0.18); }
+      #${SETTINGS_ID} .ic-mhead[hidden] + .ic-mrow { box-shadow: none; }
+      /* 不分别控制：每行只有一个开关，靠右（用 translateX 挪到最右一列）；字数开关和列名隐藏。
+         分别控制：这个开关弹簧滑回 Token 列，字数开关和列名随后淡入弹出。关闭时顺序相反。 */
+      #${SETTINGS_ID} .ic-mhead .ic-hl { opacity: 0; transition: opacity 140ms ease-in; }
+      #${SETTINGS_ID}.ic-tw .ic-mhead .ic-hl { opacity: 0.55; transition: opacity 260ms ease-out 120ms; }
+      #${SETTINGS_ID} .ic-mrow .ic-main {
+        grid-column: 2; grid-row: 1;
+        transform: translateX(64px);
+        transition: transform 560ms ${SPRING_SOFT} 90ms, background-color 260ms ease;
+      }
+      #${SETTINGS_ID}.ic-tw .ic-mrow .ic-main { transform: none; transition: transform 560ms ${SPRING_SOFT}, background-color 260ms ease; }
+      #${SETTINGS_ID} .ic-mrow .ic-words {
+        grid-column: 3; grid-row: 1;
+        opacity: 0; transform: scale(0.6); pointer-events: none;
+        transition: transform 160ms cubic-bezier(0.4, 0, 1, 1), opacity 120ms ease-in, background-color 260ms ease;
+      }
+      #${SETTINGS_ID}.ic-tw .ic-mrow .ic-words {
+        opacity: 1; transform: none; pointer-events: auto;
+        transition: transform 560ms ${SPRING_SOFT} 80ms, opacity 220ms ease-out 80ms, background-color 260ms ease;
+      }
+      #${SETTINGS_ID} .ic-mrow > span:first-child { grid-row: 1; grid-column: 1; }
       #${SETTINGS_ID} .ic-matrix + .ic-row { box-shadow: inset 0 1px 0 rgba(127, 127, 127, 0.18); }
       /* 用户那一组：组本身不做动画，各行依次弹入 */
       #${SETTINGS_ID} .ic-rowgroup { box-shadow: inset 0 1px 0 rgba(127, 127, 127, 0.18); }
@@ -684,7 +709,12 @@ $(() => {
     const id = Number(mesEl.getAttribute('mesid'));
     const msg = getCtx()?.chat?.[id];
     const p = settings.splitCount && isUserMes(mesEl) ? 'u' : 'c';
-    const flag = (k) => !!settings[p + k];
+    const flag = (k) => {
+      if (settings.splitTW) return !!settings[p + k];
+      if (k === 'ReasonTok' || k === 'ReasonWords') return !!settings[p + 'Reason'];
+      if (k === 'HiddenTok') return !!settings[p + 'Hidden'];
+      return false; // 不分别控制时，隐藏内容不计入字数
+    };
     const raw = msg && typeof msg.mes === 'string' ? msg.mes : null;
 
     let inline = '';
@@ -984,21 +1014,22 @@ $(() => {
           <div class="ic-section">
             <div class="ic-label">统计口径</div>
             <div class="ic-card">
-              <div class="ic-matrix">
-                <div class="ic-mrow ic-mhead"><span class="ic-lbl"><span class="ic-prefix">角色</span><span class="ic-text"></span></span><span>Token</span><span>字数</span></div>
-                <div class="ic-mrow"><span>思维链</span><button type="button" class="ic-switch" role="switch" data-key="cReasonTok" aria-label="思维链计入 Token"></button><button type="button" class="ic-switch" role="switch" data-key="cReasonWords" aria-label="思维链计入字数"></button></div>
-                <div class="ic-mrow"><span>隐藏内容</span><button type="button" class="ic-switch" role="switch" data-key="cHiddenTok" aria-label="隐藏内容计入 Token"></button><button type="button" class="ic-switch" role="switch" data-key="cHiddenWords" aria-label="隐藏内容计入字数"></button></div>
+              <div class="ic-row" style="padding-right:22px"><span>分别控制 Token 和字数</span><button type="button" class="ic-switch" role="switch" data-key="splitTW"></button></div>
+              <div class="ic-matrix" data-who="c">
+                <div class="ic-mrow ic-mhead"><span class="ic-lbl"><span class="ic-prefix">角色</span><span class="ic-text"></span></span><span class="ic-hl">Token</span><span class="ic-hl">字数</span></div>
+                <div class="ic-mrow"><span>思维链</span><button type="button" class="ic-switch ic-main" role="switch" data-main="Reason" aria-label="思维链"></button><button type="button" class="ic-switch ic-words" role="switch" data-words="Reason" aria-label="思维链计入字数"></button></div>
+                <div class="ic-mrow"><span>隐藏内容</span><button type="button" class="ic-switch ic-main" role="switch" data-main="Hidden" aria-label="隐藏内容"></button><button type="button" class="ic-switch ic-words" role="switch" data-words="Hidden" aria-label="隐藏内容计入字数"></button></div>
               </div>
               <div class="ic-row" style="padding-right:22px"><span>角色与用户分别设置</span><button type="button" class="ic-switch" role="switch" data-key="splitCount"></button></div>
               <div class="ic-rowgroup" data-row="userCount">
-              <div class="ic-matrix">
-                <div class="ic-mrow ic-mhead"><span class="ic-lbl"><span class="ic-tag">用户</span></span><span>Token</span><span>字数</span></div>
-                <div class="ic-mrow"><span>思维链</span><button type="button" class="ic-switch" role="switch" data-key="uReasonTok" aria-label="思维链计入 Token"></button><button type="button" class="ic-switch" role="switch" data-key="uReasonWords" aria-label="思维链计入字数"></button></div>
-                <div class="ic-mrow"><span>隐藏内容</span><button type="button" class="ic-switch" role="switch" data-key="uHiddenTok" aria-label="隐藏内容计入 Token"></button><button type="button" class="ic-switch" role="switch" data-key="uHiddenWords" aria-label="隐藏内容计入字数"></button></div>
+              <div class="ic-matrix" data-who="u">
+                <div class="ic-mrow ic-mhead"><span class="ic-lbl"><span class="ic-tag">用户</span></span><span class="ic-hl">Token</span><span class="ic-hl">字数</span></div>
+                <div class="ic-mrow"><span>思维链</span><button type="button" class="ic-switch ic-main" role="switch" data-main="Reason" aria-label="思维链"></button><button type="button" class="ic-switch ic-words" role="switch" data-words="Reason" aria-label="思维链计入字数"></button></div>
+                <div class="ic-mrow"><span>隐藏内容</span><button type="button" class="ic-switch ic-main" role="switch" data-main="Hidden" aria-label="隐藏内容"></button><button type="button" class="ic-switch ic-words" role="switch" data-words="Hidden" aria-label="隐藏内容计入字数"></button></div>
               </div>
               </div>
             </div>
-            <p class="ic-foot">分别选择思维链、隐藏内容是否计入 Token 和字数。<br>思维链：酒馆自带的思维链，以及正文中 &lt;think&gt; 等标签内的内容。<br>隐藏内容：HTML 标签、注释、CSS 代码，以及被正则隐藏、页面上看不到的文字。<br>思维链与隐藏内容的 Token 都开启时，与酒馆自带计数一致。输入框始终按原文统计。</p>
+            <p class="ic-foot">思维链：酒馆自带的思维链，以及正文中 &lt;think&gt; 等标签内的内容。开启时计入 Token 和字数。<br>隐藏内容：HTML 标签、注释、CSS 代码，以及被正则隐藏的文字。开启时仅计入 Token。<br>分别控制 Token 和字数：开启后每项可单独设置是否计入 Token、字数。输入框始终按原文统计。</p>
           </div>
 
           <div class="ic-section">
@@ -1022,7 +1053,8 @@ $(() => {
       ['pointerup', 'pointercancel', 'pointerleave'].forEach((t) => sw.addEventListener(t, () => sw.classList.remove('ic-press')));
       sw.addEventListener('click', () => {
         sw.classList.remove('ic-press');
-        const key = sw.dataset.key;
+        const key = switchKey(sw);
+        if (key === 'splitTW') { toggleSplitTW(); return; }
         settings[key] = !settings[key];
         saveSettings();
         sw.setAttribute('aria-checked', String(settings[key]));
@@ -1032,7 +1064,8 @@ $(() => {
           syncRoleLabels(true);
         }
         // 重算放到动画开始之后，避免和过渡抢主线程
-        if (key === 'splitCount' || /^[cu](Reason|Hidden)(Tok|Words)$/.test(key)) { setTimeout(recountAll, 60); return; }
+        if (key === 'splitCount') syncMatrixHeads(true);
+        if (key === 'splitCount' || /^[cu](Reason|Hidden)(Tok|Words)?$/.test(key)) { setTimeout(recountAll, 60); return; }
         if (key === 'hideNative') { syncNativeHidden(); return; }
         if (key === 'globalPos') toggleSection(el.querySelector('[data-row="splitRole"]'), settings.globalPos);
         // 切换位置规则后，所有楼层按新规则重新摆
@@ -1094,13 +1127,54 @@ $(() => {
     }
   }
 
+  // 统计口径的开关对应哪个设置：每行左边那个（ic-main）不分别控制时管"这一项算不算"，分别控制时管 Token
+  function switchKey(sw) {
+    if (sw.dataset.key) return sw.dataset.key;
+    const who = sw.closest('.ic-matrix')?.dataset.who || 'c';
+    if (sw.dataset.main) return who + sw.dataset.main + (settings.splitTW ? 'Tok' : '');
+    return who + sw.dataset.words + 'Words';
+  }
+
+  // 角色那张表的表头（"角色" + Token/字数列名）只有分开设置或分别控制时才需要，否则收起不占位置
+  function syncMatrixHeads(animate) {
+    const head = getSettingsEl().querySelector('.ic-matrix[data-who="c"] .ic-mhead');
+    const show = !!(settings.splitTW || settings.splitCount);
+    if (animate) toggleSection(head, show);
+    else head.hidden = !show;
+  }
+
+  // 打开分别控制：原开关滑到左边变成 Token 开关（状态不变），字数开关按当前实际效果预设后弹出，数字不变。
+  // 关闭分别控制：字数开关淡出，Token 开关滑回原位，它的开 / 关就是这一项"算不算"。
+  function toggleSplitTW() {
+    const el = getSettingsEl();
+    const on = !settings.splitTW;
+    ['c', 'u'].forEach((p) => {
+      if (on) {
+        settings[p + 'ReasonTok'] = settings[p + 'ReasonWords'] = !!settings[p + 'Reason'];
+        settings[p + 'HiddenTok'] = !!settings[p + 'Hidden'];
+        settings[p + 'HiddenWords'] = false;
+      } else {
+        settings[p + 'Reason'] = !!settings[p + 'ReasonTok'];
+        settings[p + 'Hidden'] = !!settings[p + 'HiddenTok'];
+      }
+    });
+    settings.splitTW = on;
+    saveSettings();
+    el.querySelectorAll('.ic-switch').forEach((sw) => sw.setAttribute('aria-checked', String(!!settings[switchKey(sw)])));
+    syncMatrixHeads(true);
+    el.classList.toggle('ic-tw', on);
+    setTimeout(recountAll, 60);
+  }
+
   function syncSettingsUI() {
     const el = getSettingsEl();
     el.querySelector('.ic-seg').dataset.v = settings.mode;
     el.querySelectorAll('.ic-seg button').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.mode === settings.mode)));
     el.querySelectorAll('[data-note]').forEach((n) => { n.hidden = n.dataset.note !== settings.mode; });
     el.querySelector('[data-section="pos"]').hidden = isFollow();
-    el.querySelectorAll('.ic-switch').forEach((sw) => sw.setAttribute('aria-checked', String(!!settings[sw.dataset.key])));
+    el.classList.toggle('ic-tw', !!settings.splitTW);
+    el.querySelectorAll('.ic-switch').forEach((sw) => sw.setAttribute('aria-checked', String(!!settings[switchKey(sw)])));
+    syncMatrixHeads(false);
     el.querySelector('[data-row="splitRole"]').hidden = !settings.globalPos;
     el.querySelector('[data-row="userCount"]').hidden = !settings.splitCount;
     syncRoleLabels();
