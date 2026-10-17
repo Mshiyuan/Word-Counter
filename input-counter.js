@@ -626,38 +626,55 @@ $(() => {
   const REASONING_OPEN_RE = new RegExp(`<(${REASONING_TAGS})\\b[^>]*>[\\s\\S]*$`, 'i'); // 流式输出中还没闭合的
   const stripReasoningTags = (text) => text.replace(REASONING_BLOCK_RE, '').replace(REASONING_OPEN_RE, '');
 
-  // 页面上显示的文字；不计思维链时把显示出来的思维链块（标签元素、折叠块）去掉
-  function shownText(mesEl, withReasoning) {
+  // 去掉 HTML 注释和标签，只留文字（用于"不计隐藏内容"时的思维链原文）
+  const stripMarkup = (text) => text.replace(/<!--[\s\S]*?-->/g, '').replace(/<(style|script)\b[\s\S]*?<\/\1\s*>/gi, '').replace(/<[^>]+>/g, '');
+
+  // 页面上显示的正文：用 innerText（不含 <style>/<script>、不含被隐藏的元素），
+  // 再扣掉其中显示出来的思维链块（思维链单独统计）。
+  // 注意不能用 textContent：美化消息里常有大段 <style>，textContent 会把 CSS 代码也算进去。
+  function shownBody(mesEl) {
     const node = mesEl.querySelector('.mes_text');
     if (!node) return '';
-    if (withReasoning) return node.innerText || '';
-    const clone = node.cloneNode(true);
-    clone.querySelectorAll(REASONING_TAGS.split('|').join(',')).forEach((n) => n.remove());
-    // 折叠块只去掉标题像思维链的，状态栏之类的折叠块保留
-    clone.querySelectorAll('details').forEach((d) => {
-      if (/思|推理|think|reason|cot/i.test(d.querySelector('summary')?.textContent || '')) d.remove();
+    let text = node.innerText || '';
+    const blocks = [...node.querySelectorAll(REASONING_TAGS.split('|').join(','))];
+    node.querySelectorAll('details').forEach((d) => {
+      if (/思|推理|think|reason|cot/i.test(d.querySelector('summary')?.textContent || '')) blocks.push(d);
     });
-    return clone.textContent || '';
+    blocks.forEach((el) => {
+      const t = el.innerText;
+      if (t && t.trim()) text = text.replace(t, '');
+    });
+    return text;
   }
 
-  // 设置里可以关掉思维链、关掉隐藏内容（关掉后改用页面上实际显示的文字）
+  // 统计口径：
+  //   正文   = 消息去掉思维链后的部分；"计入隐藏内容"关闭时只取页面上显示出来的正文
+  //   思维链 = extra.reasoning + 正文里的思维链标签块
+  //   字数   = 正文的字数（不含思维链）
+  //   Token  = 正文 +（"计入思维链"开启时）思维链
+  // 所以"计入思维链"只影响 Token；"计入隐藏内容"同时影响 Token 和字数。
   function getMesParts(mesEl) {
     const id = Number(mesEl.getAttribute('mesid'));
     const msg = getCtx()?.chat?.[id];
     const asUser = settings.splitCount && isUserMes(mesEl);
     const withReasoning = asUser ? settings.userReasoning : settings.countReasoning;
     const withHidden = asUser ? settings.userHidden : settings.countHidden;
-    let body;
-    if (withHidden && msg && typeof msg.mes === 'string') body = withReasoning ? msg.mes : stripReasoningTags(msg.mes);
-    else body = shownText(mesEl, withReasoning);
-    let reasoning = '';
-    if (withReasoning) {
-      if (withHidden) reasoning = typeof msg?.extra?.reasoning === 'string' ? msg.extra.reasoning : '';
-      else reasoning = mesEl.querySelector('.mes_reasoning')?.innerText || '';
+    const raw = msg && typeof msg.mes === 'string' ? msg.mes : null;
+
+    let inline = '';
+    if (raw) {
+      const blocks = raw.match(REASONING_BLOCK_RE) || [];
+      const open = raw.replace(REASONING_BLOCK_RE, '').match(REASONING_OPEN_RE); // 流式输出中还没闭合的
+      inline = [...blocks, open?.[0]].filter(Boolean).join('');
     }
-    const inline = withReasoning && withHidden && msg && typeof msg.mes === 'string' && REASONING_BLOCK_RE.test(msg.mes);
-    REASONING_BLOCK_RE.lastIndex = 0;
-    return { body, tok: reasoning + body, hasReasoning: !!reasoning || inline };
+    let reasoning = (typeof msg?.extra?.reasoning === 'string' ? msg.extra.reasoning : '') + inline;
+    if (!raw && !reasoning) reasoning = mesEl.querySelector('.mes_reasoning')?.textContent || '';
+
+    const body = withHidden && raw != null ? stripReasoningTags(raw) : shownBody(mesEl);
+    if (!withHidden) reasoning = stripMarkup(reasoning);
+    // 和酒馆自带计数一样直接拼接（reasoning + mes），数字才对得上
+    const counted = withReasoning ? reasoning : '';
+    return { body, tok: counted + body, hasReasoning: !!counted.trim() };
   }
 
   // 酒馆自带的楼层 Token 显示：脚本开启且设置里选了隐藏时才藏
@@ -943,7 +960,7 @@ $(() => {
                 <div class="ic-row ic-sub"><span class="ic-lbl"><span class="ic-tag">用户 · </span><span>计入隐藏内容</span></span><button type="button" class="ic-switch" role="switch" data-key="userHidden"></button></div>
               </div>
             </div>
-            <p class="ic-foot">计入思维链：开启时楼层 Token 与酒馆自带计数一致。<br>计入隐藏内容：关闭后仅统计页面上显示的文字，不计 HTML 标签、注释、被正则隐藏的内容及 Markdown 符号。<br>角色与用户分别设置：开启后角色消息和用户消息各用一组开关；关闭时共用上面一组。输入框始终按原文统计。</p>
+            <p class="ic-foot">计入思维链：只影响 Token，字数始终只统计正文；开启时与酒馆自带计数一致。<br>计入隐藏内容：同时影响 Token 和字数；关闭后只统计页面上显示的文字，不计 HTML 代码、注释、被隐藏的内容及 Markdown 符号。<br>角色与用户分别设置：开启后角色消息和用户消息各用一组开关；关闭时共用上面一组。输入框始终按原文统计。</p>
           </div>
 
           <div class="ic-section">
