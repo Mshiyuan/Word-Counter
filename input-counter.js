@@ -200,6 +200,10 @@ $(() => {
         pointer-events: auto;
         transition: transform 420ms ${EASE_POP}, opacity 180ms ease-out;
       }
+      /* 在屏幕左半边：小球和收缩原点都换到左端 */
+      #${BADGE_ID}.ic-left .ic-panel { transform-origin: 12px 50%; }
+      #${BADGE_ID}.ic-left .ic-ball,
+      #${BADGE_ID}.ic-left.ic-collapsed .ic-panel { left: 0; right: auto; }
       #${BADGE_ID} .ic-pending { opacity: 0.5; }
 
       /* 楼层计数：和输入框标签同一套横排胶囊样式，缩小一号，默认靠右放在正文下面 */
@@ -467,6 +471,7 @@ $(() => {
     const p = clampToViewport(badge, left, top);
     badge.style.left = `${p.left}px`;
     badge.style.top = `${p.top}px`;
+    updateSide(badge);
   }
 
   function resetBadgePos() {
@@ -485,13 +490,24 @@ $(() => {
   }
 
   // 点一下在"胶囊"和"球"之间切换。球固定在胶囊右端，切换时保持右边缘不动，看起来就是原地缩放。
+  // 悬浮栏在屏幕左半边时，小球收在胶囊左端、展开往右长；在右半边则相反
+  function updateSide(badge) {
+    const r = badge.getBoundingClientRect();
+    if (!r.width) return;
+    badge.classList.toggle('ic-left', r.left + r.width / 2 < mainWin.innerWidth / 2);
+  }
+
   function toggleCollapsed(badge) {
-    const before = badge.offsetLeft + badge.offsetWidth;
+    updateSide(badge);
+    const onLeft = badge.classList.contains('ic-left');
+    const beforeLeft = badge.offsetLeft;
+    const beforeRight = beforeLeft + badge.offsetWidth;
     collapsed = !collapsed;
     lsSet(LS_COLLAPSED, collapsed ? '1' : '0');
     badge.classList.toggle('ic-collapsed', collapsed);
     if (savedPos) {
-      badge.style.left = `${badge.offsetLeft + before - (badge.offsetLeft + badge.offsetWidth)}px`;
+      // 左边：保持左边缘不动；右边：保持右边缘不动
+      badge.style.left = `${onLeft ? beforeLeft : beforeRight - badge.offsetWidth}px`;
       const p = clampToViewport(badge, badge.offsetLeft, badge.offsetTop);
       badge.style.left = `${p.left}px`;
       savePosFrom(badge);
@@ -534,7 +550,7 @@ $(() => {
       clearTimeout(pressTimer);
       try { badge.releasePointerCapture(e.pointerId); } catch (err) {}
       badge.classList.remove('ic-pressed', 'ic-dragging');
-      if (start.moved) savePosFrom(badge);
+      if (start.moved) { savePosFrom(badge); updateSide(badge); }
       else if (!start.longPressed && e.type === 'pointerup') toggleCollapsed(badge);
       start = null;
       positionBadge();
