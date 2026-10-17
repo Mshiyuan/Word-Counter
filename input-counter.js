@@ -360,7 +360,9 @@ $(() => {
       }
       #${SETTINGS_ID} .ic-mrow > span:first-child { justify-self: start; }
       #${SETTINGS_ID} .ic-mrow + .ic-mrow { box-shadow: inset 0 1px 0 rgba(127, 127, 127, 0.18); }
-      #${SETTINGS_ID} .ic-mhead { min-height: 32px; font-size: 12px; }
+      /* 表头（角色 / 用户、Token / 字数）当作下面开关的小标题：上方留白、贴近下一行，和下一行之间不画分隔线 */
+      #${SETTINGS_ID} .ic-mhead { min-height: 0; padding-top: 12px; padding-bottom: 0; align-items: end; font-size: 12px; line-height: 1.2; }
+      #${SETTINGS_ID} .ic-mhead + .ic-mrow { box-shadow: none; }
       #${SETTINGS_ID} .ic-mhead[hidden] { display: none; }
       #${SETTINGS_ID} .ic-row + .ic-matrix { box-shadow: inset 0 1px 0 rgba(127, 127, 127, 0.18); }
       #${SETTINGS_ID} .ic-mhead[hidden] + .ic-mrow { box-shadow: none; }
