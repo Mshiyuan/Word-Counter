@@ -51,8 +51,9 @@ $(() => {
   //     u* 同上，"角色与用户分别设置"（splitCount）开启时用于用户消息，c* 用于角色消息；关闭时全部用 c*
   //   以上是第一次导入时的默认值，之后一直用用户自己保存的设置
   //   showContext     悬浮栏是否显示上下文 Token
+  //   ctxInput        上下文是否计入输入框内容（以及输入框里的字会触发的世界书）
   //   hideNative      是否隐藏酒馆自带的楼层 Token 显示
-  const DEFAULT_SETTINGS = { mode: 'follow', globalPos: true, splitRole: false, splitTW: false, cReason: true, cHidden: true, uReason: true, uHidden: true, cReasonTok: true, cReasonWords: true, cHiddenTok: true, cHiddenWords: false, splitCount: false, uReasonTok: true, uReasonWords: true, uHiddenTok: true, uHiddenWords: false, hideNative: false, showContext: true, pos: { all: null, user: null, char: null }, perMes: {} };
+  const DEFAULT_SETTINGS = { mode: 'follow', globalPos: true, splitRole: false, splitTW: false, cReason: true, cHidden: true, uReason: true, uHidden: true, cReasonTok: true, cReasonWords: true, cHiddenTok: true, cHiddenWords: false, splitCount: false, uReasonTok: true, uReasonWords: true, uHiddenTok: true, uHiddenWords: false, hideNative: false, showContext: true, ctxInput: true, pos: { all: null, user: null, char: null }, perMes: {} };
   const settings = (() => {
     try {
       const s = JSON.parse(lsGet(LS_SETTINGS) || 'null') || {};
@@ -1037,8 +1038,9 @@ $(() => {
             <div class="ic-card">
               <div class="ic-row"><span>隐藏酒馆自带楼层计数</span><button type="button" class="ic-switch" role="switch" data-key="hideNative"></button></div>
               <div class="ic-row"><span>显示上下文 Token</span><button type="button" class="ic-switch" role="switch" data-key="showContext"></button></div>
+              <div class="ic-row ic-sub" data-row="ctxInput"><span>计入输入框内容</span><button type="button" class="ic-switch" role="switch" data-key="ctxInput"></button></div>
             </div>
-            <p class="ic-foot">上下文 Token：按当前的预设、角色卡、世界书和聊天记录估算这次发送的上下文，再加上输入框的内容。世界书有概率触发的条目时显示为范围。</p>
+            <p class="ic-foot">上下文 Token：按当前的预设、角色卡、世界书和聊天记录估算这次发送的上下文。<br>计入输入框内容：加上输入框里的文字，以及这些文字会触发的世界书条目（停止输入约 1 秒后更新）。<br>世界书有概率触发的条目时显示为范围。</p>
           </div>
 
           <div class="ic-section" data-section="pos">
@@ -1111,7 +1113,13 @@ $(() => {
         if (key === 'splitCount') { el.classList.toggle('ic-role', !!settings.splitCount); syncMatrixHeads(true); }
         if (key === 'splitCount' || /^[cu](Reason|Hidden)(Tok|Words)?$/.test(key)) { setTimeout(recountAll, 60); return; }
         if (key === 'hideNative') { syncNativeHidden(); return; }
-        if (key === 'showContext') { renderContext(); if (settings.showContext) scheduleContext(0); return; }
+        if (key === 'showContext') {
+          toggleSection(el.querySelector('[data-row="ctxInput"]'), settings.showContext);
+          renderContext();
+          if (settings.showContext) scheduleContext(0);
+          return;
+        }
+        if (key === 'ctxInput') { renderContext(); if (settings.ctxInput) scheduleInputWI(0); return; }
         if (key === 'globalPos') toggleSection(el.querySelector('[data-row="splitRole"]'), settings.globalPos);
         // 切换位置规则后，所有楼层按新规则重新摆
         applyAllLabelPos(null);
@@ -1233,6 +1241,7 @@ $(() => {
     syncMatrixHeads(false);
     el.querySelector('[data-row="splitRole"]').hidden = !settings.globalPos;
     el.querySelector('[data-row="userCount"]').hidden = !settings.splitCount;
+    el.querySelector('[data-row="ctxInput"]').hidden = !settings.showContext;
     syncRoleLabels();
   }
 
@@ -1341,9 +1350,13 @@ $(() => {
     if (!ctxBase) {
       el.textContent = '上下文 …';
     } else {
-      const lo = ctxBase.min + inputTok, hi = ctxBase.max + inputTok;
+      const withInput = settings.ctxInput;
+      const addLo = withInput ? inputTok + inputWI.min : 0;
+      const addHi = withInput ? inputTok + inputWI.max : 0;
+      const lo = ctxBase.min + addLo, hi = ctxBase.max + addHi;
       el.textContent = lo === hi ? `上下文 ${fmtK(lo)}` : `上下文 ${fmtK(lo)}～${fmtK(hi)}`;
-      el.title = lo === hi ? `上下文约 ${lo} Token（含输入框 ${inputTok}）` : `上下文约 ${lo}～${hi} Token（世界书概率条目全部不触发～全部触发；含输入框 ${inputTok}）`;
+      const inputNote = withInput ? `；含输入框 ${inputTok}${inputWI.max ? `，输入框触发的世界书 ${inputWI.min === inputWI.max ? inputWI.min : `${inputWI.min}～${inputWI.max}`}` : ''}` : '';
+      el.title = `上下文约 ${lo === hi ? lo : `${lo}～${hi}`} Token${lo === hi ? '' : '（世界书概率条目全部不触发～全部触发）'}${inputNote}`;
     }
     el.classList.toggle('ic-pending', ctxRunning);
     positionBadge();
@@ -1354,6 +1367,7 @@ $(() => {
     const text = getTextarea()?.value || '';
     if (text === inputTokText) return;
     inputTokText = text;
+    if (text !== inputWIText) scheduleInputWI(); // 停止输入约 1 秒后扫描输入框触发的世界书
     clearTimeout(inputTokTimer);
     if (!text) { inputTok = 0; renderContext(); return; }
     const cached = tokenCache.get(text);
@@ -1376,6 +1390,72 @@ $(() => {
     }).join('\n');
   }
 
+  // 临时固定随机数（用于世界书概率条目全触发 / 全不触发）。真正的生成一开始就立刻还原。
+  let restoreRandomNow = null;
+  async function withFixedRandom(value, fn) {
+    const orig = mainWin.Math.random;
+    let restored = false;
+    const restore = () => { if (!restored) { mainWin.Math.random = orig; restored = true; } };
+    restoreRandomNow = restore;
+    mainWin.Math.random = () => value;
+    try { return await fn(); } finally { restore(); if (restoreRandomNow === restore) restoreRandomNow = null; }
+  }
+
+  // 输入框里的字会触发哪些世界书：用酒馆的世界书扫描（只扫描、不发送、不触发任何事件），
+  // 分别在"聊天记录 + 输入框"和"只有聊天记录"上扫一次，多出来的条目内容就是输入框触发的部分。
+  let inputWI = { min: 0, max: 0 };
+  let inputWIText = null;
+  let inputWITimer = null;
+  let inputWIRunning = false;
+
+  function wiResultText(res) {
+    if (!res) return '';
+    const parts = [res.worldInfoString || ''];
+    (res.worldInfoDepth || []).forEach((d) => parts.push(...(d?.entries || [])));
+    parts.push(...(res.anBefore || []), ...(res.anAfter || []));
+    (res.worldInfoExamples || []).forEach((e) => parts.push(typeof e === 'string' ? e : (e?.content || '')));
+    Object.values(res.outletEntries || {}).forEach((arr) => Array.isArray(arr) && parts.push(...arr));
+    return parts.filter((x) => typeof x === 'string' && x).join('\n');
+  }
+
+  async function wiTokensOnce(chatForWI, ctx) {
+    const res = await ctx.getWorldInfoPrompt(chatForWI, Number(ctx.maxContext) || 8192, true);
+    const text = wiResultText(res);
+    return text ? (await countTokens(text)).value : 0;
+  }
+
+  async function runInputWI() {
+    const text = getTextarea()?.value || '';
+    if (!enabled || !settings.showContext || !settings.ctxInput) return;
+    if (!text.trim()) { inputWIText = text; inputWI = { min: 0, max: 0 }; renderContext(); return; }
+    const ctx = getCtx();
+    if (!ctx || typeof ctx.getWorldInfoPrompt !== 'function' || !Array.isArray(ctx.chat) || realGenerating) return;
+    if (inputWIRunning) { scheduleInputWI(300); return; }
+    inputWIRunning = true;
+    try {
+      // 和酒馆一样：不算隐藏（系统）消息，最新的在最前
+      const base = ctx.chat.filter((m) => m && !m.is_system && typeof m.mes === 'string').map((m) => m.mes).reverse();
+      const withInput = [text, ...base];
+      const extra = async (rv) => withFixedRandom(rv, async () => Math.max(0, (await wiTokensOnce(withInput, ctx)) - (await wiTokensOnce(base, ctx))));
+      const lo = await extra(0.999999);
+      const hi = await extra(0);
+      if ((getTextarea()?.value || '') !== text) return; // 期间又改了，等下一轮
+      inputWIText = text;
+      inputWI = { min: Math.min(lo, hi), max: Math.max(lo, hi) };
+    } catch (e) {
+      console.warn(`[${SCRIPT_ID}] 输入框世界书估算失败`, e);
+    } finally {
+      inputWIRunning = false;
+      renderContext();
+    }
+  }
+
+  function scheduleInputWI(delay = 1000) {
+    if (!enabled || !settings.showContext || !settings.ctxInput) return;
+    clearTimeout(inputWITimer);
+    inputWITimer = setTimeout(runInputWI, delay);
+  }
+
   async function dryRunOnce(randomValue) {
     const ctx = getCtx();
     const es = ctx?.eventSource;
@@ -1384,24 +1464,19 @@ $(() => {
     let captured = null;
     const hadOwnEmit = Object.prototype.hasOwnProperty.call(es, 'emit');
     const origEmit = es.emit;
-    const origRandom = mainWin.Math.random;
-    let randomRestored = false;
-    const restoreRandom = () => { if (!randomRestored) { mainWin.Math.random = origRandom; randomRestored = true; } };
     es.emit = function (event, ...args) {
       const isStart = event === T.GENERATION_STARTED || event === T.GENERATION_AFTER_COMMANDS;
-      if (isStart && args[2] !== true) restoreRandom(); // 真正的生成开始了
+      if (isStart && args[2] !== true) restoreRandomNow?.(); // 真正的生成开始了，立刻还原随机数
       if (isStart && args[2] === true) return Promise.resolve(); // 本脚本的 dry run：不通知"开始生成"
       if (event === T.GENERATE_AFTER_DATA && args[1] === true) captured = args[0];
       return origEmit.apply(this, [event, ...args]);
     };
     try {
-      mainWin.Math.random = () => randomValue;
-      await ctx.generate('normal', {}, true);
+      await withFixedRandom(randomValue, () => ctx.generate('normal', {}, true));
     } catch (e) {
       console.warn(`[${SCRIPT_ID}] 上下文估算失败`, e);
       captured = null;
     } finally {
-      restoreRandom();
       if (hadOwnEmit) es.emit = origEmit; else delete es.emit;
     }
     if (!captured) return null;
@@ -1426,6 +1501,8 @@ $(() => {
       const allProb = await dryRunOnce(0); // 概率条目都触发
       ctxBase = { min: Math.min(noneProb, allProb ?? noneProb), max: Math.max(noneProb, allProb ?? noneProb) };
       ctxState = 'idle';
+      inputWIText = null; // 聊天变了，输入框触发的世界书也要重新扫
+      scheduleInputWI(200);
     } finally {
       ctxRunning = false;
       renderContext();
@@ -1451,7 +1528,7 @@ $(() => {
     ['CHAT_CHANGED', 'MESSAGE_SENT', 'MESSAGE_RECEIVED', 'MESSAGE_EDITED', 'MESSAGE_DELETED', 'MESSAGE_SWIPED',
       'SETTINGS_UPDATED', 'OAI_PRESET_CHANGED_AFTER', 'WORLDINFO_UPDATED', 'WORLDINFO_SETTINGS_UPDATED', 'CHARACTER_EDITED']
       .forEach((name) => on(name, again));
-    on('GENERATION_STARTED', (type, params, dryRun) => { if (dryRun !== true) realGenerating = true; });
+    on('GENERATION_STARTED', (type, params, dryRun) => { if (dryRun !== true) { realGenerating = true; restoreRandomNow?.(); } });
     const ended = () => { realGenerating = false; scheduleContext(); };
     on('GENERATION_ENDED', ended);
     on('GENERATION_STOPPED', ended);
@@ -1546,6 +1623,7 @@ $(() => {
   $(window).on('pagehide', () => {
     clearTimeout(ctxTimer);
     clearTimeout(inputTokTimer);
+    clearTimeout(inputWITimer);
     unbindContextEvents();
     clearInterval(pollTimer);
     clearInterval(mesPollTimer);
