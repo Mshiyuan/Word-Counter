@@ -124,7 +124,6 @@ $(() => {
       #${BADGE_ID} {
         position: fixed;
         z-index: 3000;
-        height: 24px;
         font-size: 12px;
         line-height: 18px;
         font-family: var(--mainFontFamily, inherit);
@@ -145,18 +144,20 @@ $(() => {
       #${BADGE_ID} .ic-panel,
       #${BADGE_ID} .ic-ball {
         box-sizing: border-box;
-        height: 24px;
+        min-height: 24px;
         background: var(--SmartThemeBlurTintColor, rgba(0, 0, 0, 0.55));
         border: 1px solid var(--SmartThemeBorderColor, rgba(255, 255, 255, 0.15));
         backdrop-filter: blur(var(--SmartThemeBlurStrength, 6px));
         -webkit-backdrop-filter: blur(var(--SmartThemeBlurStrength, 6px));
         will-change: transform, opacity;
       }
+      /* 胶囊：上一行上下文，下一行 Token / 字数；靠哪边就向哪边对齐 */
       #${BADGE_ID} .ic-panel {
         display: flex;
-        gap: 8px;
-        align-items: center;
-        padding: 2px 9px;
+        flex-direction: column;
+        justify-content: center;
+        align-items: flex-end;
+        padding: 2px 10px;
         border-radius: 12px;
         transform-origin: calc(100% - 12px) 50%;
         transform: scale(1);
@@ -165,13 +166,16 @@ $(() => {
       }
       #${BADGE_ID} .ic-where { opacity: 0.6; }
       #${BADGE_ID} .ic-where:empty { display: none; }
-      #${BADGE_ID} .ic-ctx { padding-left: 8px; border-left: 1px solid var(--SmartThemeBorderColor, rgba(255, 255, 255, 0.2)); }
+      #${BADGE_ID} .ic-line { display: flex; gap: 8px; }
+      #${BADGE_ID} .ic-ctx { opacity: 0.75; }
       #${BADGE_ID} .ic-ctx[hidden] { display: none; }
+      #${BADGE_ID}.ic-left .ic-panel { align-items: flex-start; }
       #${BADGE_ID} .ic-ball {
         position: absolute;
-        top: 0;
+        top: calc(50% - 12px);
         right: 0;
         width: 24px;
+        height: 24px;
         border-radius: 50%;
         display: flex;
         align-items: center;
@@ -192,7 +196,8 @@ $(() => {
       /* 收起：胶囊往右侧的球心缩没，球弹出来 */
       #${BADGE_ID}.ic-collapsed .ic-panel {
         position: absolute;
-        top: 0;
+        top: 50%;
+        margin-top: calc(var(--ic-ph, 24px) / -2); /* 收起时胶囊和小球上下居中对齐 */
         right: 0;
         transform: scale(0.12);
         opacity: 0;
@@ -474,7 +479,7 @@ $(() => {
     if (!badge) {
       badge = mainDoc.createElement('div');
       badge.id = BADGE_ID;
-      badge.innerHTML = '<div class="ic-panel"><span class="ic-where"></span><span class="ic-tokens">Token 0</span><span class="ic-words">字数 0</span><span class="ic-ctx" hidden></span></div><div class="ic-ball"></div>';
+      badge.innerHTML = '<div class="ic-panel"><span class="ic-ctx" hidden></span><div class="ic-line"><span class="ic-where"></span><span class="ic-tokens">Token 0</span><span class="ic-words">字数 0</span></div></div><div class="ic-ball"></div>';
       badge.classList.toggle('ic-collapsed', collapsed);
       badge.title = '点击收起/展开，拖动可移动，长按打开设置';
       badge.addEventListener('contextmenu', (e) => e.preventDefault());
@@ -553,14 +558,21 @@ $(() => {
     const onLeft = badge.classList.contains('ic-left');
     const beforeLeft = badge.offsetLeft;
     const beforeRight = beforeLeft + badge.offsetWidth;
+    const beforeTop = badge.offsetTop;
+    const beforeH = badge.offsetHeight;
+    const panel = badge.querySelector('.ic-panel');
+    badge.style.setProperty('--ic-ph', `${panel.offsetHeight}px`);
     collapsed = !collapsed;
     lsSet(LS_COLLAPSED, collapsed ? '1' : '0');
     badge.classList.toggle('ic-collapsed', collapsed);
     if (savedPos) {
       // 左边：保持左边缘不动；右边：保持右边缘不动
       badge.style.left = `${onLeft ? beforeLeft : beforeRight - badge.offsetWidth}px`;
+      // 上下保持中心不动（胶囊两行、小球一行，高度不同）
+      badge.style.top = `${beforeTop + (beforeH - badge.offsetHeight) / 2}px`;
       const p = clampToViewport(badge, badge.offsetLeft, badge.offsetTop);
       badge.style.left = `${p.left}px`;
+      badge.style.top = `${p.top}px`;
       savePosFrom(badge);
     }
     positionBadge();
