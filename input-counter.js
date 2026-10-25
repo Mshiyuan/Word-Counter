@@ -140,7 +140,11 @@ $(() => {
         transition: transform 140ms ease-out;
       }
       #${BADGE_ID}.ic-pressed { transform: scale(0.92); }
-      #${BADGE_ID}.ic-dragging { cursor: grabbing; transform: scale(1.04); }
+      /* 拖动中：位置用 transform 移动（不触发重新排版），关掉过渡和毛玻璃——
+         毛玻璃每移动一帧都要把背后的内容重新模糊一遍，压在图片多的美化上会明显掉帧 */
+      #${BADGE_ID}.ic-dragging { cursor: grabbing; transition: none; will-change: transform; }
+      #${BADGE_ID}.ic-dragging .ic-panel,
+      #${BADGE_ID}.ic-dragging .ic-ball { backdrop-filter: none; -webkit-backdrop-filter: none; }
       #${BADGE_ID}[hidden] { display: none; }
       #${BADGE_ID} .ic-panel,
       #${BADGE_ID} .ic-ball {
@@ -585,7 +589,12 @@ $(() => {
     badge.addEventListener('pointerdown', (e) => {
       if (e.button !== undefined && e.button !== 0) return;
       const rect = badge.getBoundingClientRect();
-      start = { id: e.pointerId, dx: e.clientX - rect.left, dy: e.clientY - rect.top, x: e.clientX, y: e.clientY, moved: false, longPressed: false };
+      // 拖动开始时记下起点和尺寸，拖动过程中不再读布局
+      start = {
+        id: e.pointerId, x: e.clientX, y: e.clientY, moved: false, longPressed: false,
+        left: parseFloat(badge.style.left) || rect.left, top: parseFloat(badge.style.top) || rect.top,
+        w: rect.width, h: rect.height, tx: 0, ty: 0, raf: 0,
+      };
       try { badge.setPointerCapture(e.pointerId); } catch (err) {}
       badge.classList.add('ic-pressed');
       clearTimeout(pressTimer);
@@ -605,14 +614,34 @@ $(() => {
       clearTimeout(pressTimer);
       badge.classList.remove('ic-pressed');
       badge.classList.add('ic-dragging');
-      const p = clampToViewport(badge, e.clientX - start.dx, e.clientY - start.dy);
-      badge.style.left = `${p.left}px`;
-      badge.style.top = `${p.top}px`;
+      const left = Math.max(2, Math.min(start.left + e.clientX - start.x, mainWin.innerWidth - start.w - 2));
+      const top = Math.max(2, Math.min(start.top + e.clientY - start.y, mainWin.innerHeight - start.h - 2));
+      start.tx = left - start.left;
+      start.ty = top - start.top;
+      // 每帧最多更新一次
+      if (!start.raf) {
+        start.raf = mainWin.requestAnimationFrame(() => {
+          if (!start) return;
+          start.raf = 0;
+          badge.style.transform = `translate3d(${start.tx}px, ${start.ty}px, 0) scale(1.04)`;
+        });
+      }
     });
     const end = (e) => {
       if (!start || e.pointerId !== start.id) return;
       clearTimeout(pressTimer);
       try { badge.releasePointerCapture(e.pointerId); } catch (err) {}
+      if (start.raf) mainWin.cancelAnimationFrame(start.raf);
+      if (start.moved) {
+        // 松手：把位移落到 left/top 上，去掉 transform
+        // 清 transform 时先关掉过渡，否则它会从拖动位置"滑回去"，读到的位置也是错的
+        badge.style.transition = 'none';
+        badge.style.left = `${start.left + start.tx}px`;
+        badge.style.top = `${start.top + start.ty}px`;
+        badge.style.transform = '';
+        void badge.offsetWidth;
+        mainWin.requestAnimationFrame(() => { badge.style.transition = ''; });
+      }
       badge.classList.remove('ic-pressed', 'ic-dragging');
       if (start.moved) { savePosFrom(badge); updateSide(badge); }
       else if (!start.longPressed && e.type === 'pointerup') toggleCollapsed(badge);
