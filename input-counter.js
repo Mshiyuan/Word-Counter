@@ -609,6 +609,7 @@ $(() => {
     });
     badge.addEventListener('pointermove', (e) => {
       if (!start || e.pointerId !== start.id || start.longPressed) return;
+      markInteract();
       if (!start.moved && Math.hypot(e.clientX - start.x, e.clientY - start.y) < 5) return;
       start.moved = true;
       clearTimeout(pressTimer);
@@ -1357,6 +1358,16 @@ $(() => {
   // 世界书概率触发：拼两次，一次让所有概率条目都触发（随机数固定为 0），一次都不触发（固定为接近 1），
   // 两次结果不同就显示范围。真正的生成一开始就立刻还原随机数，不影响真实发送。
   const CTX_DEBOUNCE_MS = 900;
+  const CTX_MIN_INTERVAL_MS = 2500; // 两次估算之间至少隔这么久
+  const CTX_SELF_GUARD_MS = 2000;   // 估算结束后这段时间内收到的触发事件忽略（可能是估算本身引起的，避免循环）
+  const INTERACT_QUIET_MS = 800;    // 正在拖动 / 滚动时不估算，停下来这么久再算
+  let ctxLastEnd = 0;
+  let lastInteractAt = 0;
+  const markInteract = () => { lastInteractAt = Date.now(); };
+  const busyInteracting = () => Date.now() - lastInteractAt < INTERACT_QUIET_MS;
+  // 拼好的上下文很长，算 Token 也不便宜：同样的内容不重复算
+  let lastPromptText = null;
+  let lastPromptTok = 0;
   let ctxBase = null; // { min, max }
   let ctxState = 'idle'; // idle | running | unavailable
   let ctxTimer = null;
@@ -1460,6 +1471,7 @@ $(() => {
     const ctx = getCtx();
     if (!ctx || typeof ctx.getWorldInfoPrompt !== 'function' || !Array.isArray(ctx.chat) || realGenerating) return;
     if (inputWIRunning) { scheduleInputWI(300); return; }
+    if (busyInteracting()) { scheduleInputWI(INTERACT_QUIET_MS); return; }
     inputWIRunning = true;
     try {
       // 和酒馆一样：不算隐藏（系统）消息，最新的在最前
@@ -1511,13 +1523,20 @@ $(() => {
     if (!captured) return null;
     const text = promptToText(captured.prompt);
     if (!text) return null;
-    return (await countTokens(text)).value;
+    if (text === lastPromptText) return lastPromptTok;
+    const tok = (await countTokens(text)).value;
+    lastPromptText = text;
+    lastPromptTok = tok;
+    return tok;
   }
 
   async function runContext() {
     if (!enabled || !settings.showContext) return;
     if (ctxRunning) { ctxPending = true; return; }
     if (realGenerating) return; // 正在真正生成时不打扰，生成结束后会再算
+    if (busyInteracting()) { scheduleContext(INTERACT_QUIET_MS); return; } // 正在拖动 / 滚动，等停下来
+    const wait = ctxLastEnd + CTX_MIN_INTERVAL_MS - Date.now();
+    if (wait > 0) { scheduleContext(wait); return; }
     ctxRunning = true;
     renderContext();
     try {
@@ -1534,6 +1553,7 @@ $(() => {
       scheduleInputWI(200);
     } finally {
       ctxRunning = false;
+      ctxLastEnd = Date.now();
       renderContext();
       if (ctxPending) { ctxPending = false; scheduleContext(300); }
     }
@@ -1553,9 +1573,14 @@ $(() => {
     const T = ctx?.eventTypes;
     if (!es || !T || typeof es.on !== 'function') return;
     const on = (name, fn) => { if (T[name]) { es.on(T[name], fn); ctxListeners.push([T[name], fn]); } };
-    const again = () => scheduleContext();
+    // 估算进行中或刚结束时收到的事件，可能是估算本身引起的（比如酒馆顺手保存了设置），忽略，避免"估算→事件→再估算"循环。
+    // 不监听 SETTINGS_UPDATED：酒馆保存设置非常频繁，监听它最容易形成循环；预设切换另有 OAI_PRESET_CHANGED_AFTER。
+    const again = () => {
+      if (ctxRunning || Date.now() - ctxLastEnd < CTX_SELF_GUARD_MS) return;
+      scheduleContext();
+    };
     ['CHAT_CHANGED', 'MESSAGE_SENT', 'MESSAGE_RECEIVED', 'MESSAGE_EDITED', 'MESSAGE_DELETED', 'MESSAGE_SWIPED',
-      'SETTINGS_UPDATED', 'OAI_PRESET_CHANGED_AFTER', 'WORLDINFO_UPDATED', 'WORLDINFO_SETTINGS_UPDATED', 'CHARACTER_EDITED']
+      'OAI_PRESET_CHANGED_AFTER', 'WORLDINFO_UPDATED', 'WORLDINFO_SETTINGS_UPDATED', 'CHARACTER_EDITED']
       .forEach((name) => on(name, again));
     on('GENERATION_STARTED', (type, params, dryRun) => { if (dryRun !== true) { realGenerating = true; restoreRandomNow?.(); } });
     const ended = () => { realGenerating = false; scheduleContext(); };
@@ -1579,6 +1604,7 @@ $(() => {
   // （补算节流到 150ms 一次，快速滑动时不会每帧都去读楼层内容，避免卡顿）
   let scanThrottle = 0;
   const onChatScroll = () => {
+    markInteract();
     if (isFollow()) {
       if (scrollRaf) return;
       scrollRaf = mainWin.requestAnimationFrame(() => { scrollRaf = 0; updateBadge(); });
