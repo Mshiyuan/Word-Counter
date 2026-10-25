@@ -50,8 +50,9 @@ $(() => {
   //     cHiddenTok / cHiddenWords   隐藏内容：HTML 标签、注释、CSS，以及被正则隐藏、页面上看不到的文字
   //     u* 同上，"角色与用户分别设置"（splitCount）开启时用于用户消息，c* 用于角色消息；关闭时全部用 c*
   //   以上是第一次导入时的默认值，之后一直用用户自己保存的设置
+  //   showContext     悬浮栏是否显示上下文 Token
   //   hideNative      是否隐藏酒馆自带的楼层 Token 显示
-  const DEFAULT_SETTINGS = { mode: 'follow', globalPos: true, splitRole: false, splitTW: false, cReason: true, cHidden: true, uReason: true, uHidden: true, cReasonTok: true, cReasonWords: true, cHiddenTok: true, cHiddenWords: false, splitCount: false, uReasonTok: true, uReasonWords: true, uHiddenTok: true, uHiddenWords: false, hideNative: false, pos: { all: null, user: null, char: null }, perMes: {} };
+  const DEFAULT_SETTINGS = { mode: 'follow', globalPos: true, splitRole: false, splitTW: false, cReason: true, cHidden: true, uReason: true, uHidden: true, cReasonTok: true, cReasonWords: true, cHiddenTok: true, cHiddenWords: false, splitCount: false, uReasonTok: true, uReasonWords: true, uHiddenTok: true, uHiddenWords: false, hideNative: false, showContext: true, pos: { all: null, user: null, char: null }, perMes: {} };
   const settings = (() => {
     try {
       const s = JSON.parse(lsGet(LS_SETTINGS) || 'null') || {};
@@ -164,6 +165,8 @@ $(() => {
       }
       #${BADGE_ID} .ic-where { opacity: 0.6; }
       #${BADGE_ID} .ic-where:empty { display: none; }
+      #${BADGE_ID} .ic-ctx { padding-left: 8px; border-left: 1px solid var(--SmartThemeBorderColor, rgba(255, 255, 255, 0.2)); }
+      #${BADGE_ID} .ic-ctx[hidden] { display: none; }
       #${BADGE_ID} .ic-ball {
         position: absolute;
         top: 0;
@@ -471,7 +474,7 @@ $(() => {
     if (!badge) {
       badge = mainDoc.createElement('div');
       badge.id = BADGE_ID;
-      badge.innerHTML = '<div class="ic-panel"><span class="ic-where"></span><span class="ic-tokens">Token 0</span><span class="ic-words">字数 0</span></div><div class="ic-ball"></div>';
+      badge.innerHTML = '<div class="ic-panel"><span class="ic-where"></span><span class="ic-tokens">Token 0</span><span class="ic-words">字数 0</span><span class="ic-ctx" hidden></span></div><div class="ic-ball"></div>';
       badge.classList.toggle('ic-collapsed', collapsed);
       badge.title = '点击收起/展开，拖动可移动，长按打开设置';
       badge.addEventListener('contextmenu', (e) => e.preventDefault());
@@ -1021,7 +1024,9 @@ $(() => {
             <p class="ic-foot" data-note="follow">楼层内不显示计数。悬浮栏显示视口当前所在楼层；输入框获得焦点时，改为统计输入内容。</p>
             <div class="ic-card">
               <div class="ic-row"><span>隐藏酒馆自带楼层计数</span><button type="button" class="ic-switch" role="switch" data-key="hideNative"></button></div>
+              <div class="ic-row"><span>显示上下文 Token</span><button type="button" class="ic-switch" role="switch" data-key="showContext"></button></div>
             </div>
+            <p class="ic-foot">上下文 Token：按当前的预设、角色卡、世界书和聊天记录估算这次发送的上下文，再加上输入框的内容。世界书有概率触发的条目时显示为范围。</p>
           </div>
 
           <div class="ic-section" data-section="pos">
@@ -1094,6 +1099,7 @@ $(() => {
         if (key === 'splitCount') { el.classList.toggle('ic-role', !!settings.splitCount); syncMatrixHeads(true); }
         if (key === 'splitCount' || /^[cu](Reason|Hidden)(Tok|Words)?$/.test(key)) { setTimeout(recountAll, 60); return; }
         if (key === 'hideNative') { syncNativeHidden(); return; }
+        if (key === 'showContext') { renderContext(); if (settings.showContext) scheduleContext(0); return; }
         if (key === 'globalPos') toggleSection(el.querySelector('[data-row="splitRole"]'), settings.globalPos);
         // 切换位置规则后，所有楼层按新规则重新摆
         applyAllLabelPos(null);
@@ -1283,14 +1289,171 @@ $(() => {
     lsSet(LS_ENABLED, v ? '1' : '0');
     getBadge().hidden = !v;
     syncNativeHidden();
-    if (v) { updateBadge(true); scanMessages(); } else { clearMessageLabels(); closeSettings(); }
+    if (v) { updateBadge(true); scanMessages(); scheduleContext(0); } else { clearMessageLabels(); closeSettings(); }
+    renderContext();
     toast(v ? '计数已开启' : '计数已关闭');
+  }
+
+  // =====================================================================
+  //  四、上下文 Token：这次发送时整个上下文大约多少 Token
+  // =====================================================================
+  // 做法：让酒馆按真正发送的方式把预设、角色卡、世界书、聊天记录拼一遍，但不发送（酒馆自带的 dry run），
+  // 再对拼好的内容算 Token。这样用的是酒馆自己的拼装逻辑，和真正发送的一致。
+  // 拼一次比较重，所以只在聊天、消息、预设、世界书等变化时重算"底数"；输入框的 Token 实时加上去。
+  //
+  // 不让其他插件以为"开始生成"：只在本脚本自己的 dry run 期间，拦下 GENERATION_STARTED /
+  // GENERATION_AFTER_COMMANDS 这两个"开始生成"事件（只拦带 dryRun 标记的，真正的生成一律放行）。
+  //
+  // 世界书概率触发：拼两次，一次让所有概率条目都触发（随机数固定为 0），一次都不触发（固定为接近 1），
+  // 两次结果不同就显示范围。真正的生成一开始就立刻还原随机数，不影响真实发送。
+  const CTX_DEBOUNCE_MS = 900;
+  let ctxBase = null; // { min, max }
+  let ctxState = 'idle'; // idle | running | unavailable
+  let ctxTimer = null;
+  let ctxRunning = false;
+  let ctxPending = false;
+  let realGenerating = false;
+  let inputTok = 0;
+  let inputTokText = null;
+  let inputTokTimer = null;
+
+  const fmtK = (n) => (n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n));
+
+  function renderContext() {
+    const badge = mainDoc.getElementById(BADGE_ID);
+    const el = badge?.querySelector('.ic-ctx');
+    if (!el) return;
+    const show = enabled && settings.showContext && ctxState !== 'unavailable';
+    el.hidden = !show;
+    if (!show) { positionBadge(); return; }
+    if (!ctxBase) {
+      el.textContent = '上下文 …';
+    } else {
+      const lo = ctxBase.min + inputTok, hi = ctxBase.max + inputTok;
+      el.textContent = lo === hi ? `上下文 ${fmtK(lo)}` : `上下文 ${fmtK(lo)}～${fmtK(hi)}`;
+      el.title = lo === hi ? `上下文约 ${lo} Token（含输入框 ${inputTok}）` : `上下文约 ${lo}～${hi} Token（世界书概率条目全部不触发～全部触发；含输入框 ${inputTok}）`;
+    }
+    el.classList.toggle('ic-pending', ctxRunning);
+    positionBadge();
+  }
+
+  // 输入框的 Token 单独维护（跟随模式下悬浮栏显示的是楼层，但上下文仍要加上输入框）
+  function updateInputTok() {
+    const text = getTextarea()?.value || '';
+    if (text === inputTokText) return;
+    inputTokText = text;
+    clearTimeout(inputTokTimer);
+    if (!text) { inputTok = 0; renderContext(); return; }
+    const cached = tokenCache.get(text);
+    if (cached) { inputTok = cached.value; renderContext(); return; }
+    inputTokTimer = setTimeout(async () => {
+      const r = await countTokensCached(text);
+      if (inputTokText !== text) return;
+      inputTok = r.value;
+      renderContext();
+    }, TOKEN_DEBOUNCE_MS);
+  }
+
+  function promptToText(prompt) {
+    if (typeof prompt === 'string') return prompt;
+    if (!Array.isArray(prompt)) return '';
+    return prompt.map((m) => {
+      if (typeof m?.content === 'string') return m.content;
+      if (Array.isArray(m?.content)) return m.content.map((part) => (typeof part?.text === 'string' ? part.text : '')).join('');
+      return '';
+    }).join('\n');
+  }
+
+  async function dryRunOnce(randomValue) {
+    const ctx = getCtx();
+    const es = ctx?.eventSource;
+    const T = ctx?.eventTypes || {};
+    if (!ctx || typeof ctx.generate !== 'function' || !es || typeof es.emit !== 'function') return null;
+    let captured = null;
+    const hadOwnEmit = Object.prototype.hasOwnProperty.call(es, 'emit');
+    const origEmit = es.emit;
+    const origRandom = mainWin.Math.random;
+    let randomRestored = false;
+    const restoreRandom = () => { if (!randomRestored) { mainWin.Math.random = origRandom; randomRestored = true; } };
+    es.emit = function (event, ...args) {
+      const isStart = event === T.GENERATION_STARTED || event === T.GENERATION_AFTER_COMMANDS;
+      if (isStart && args[2] !== true) restoreRandom(); // 真正的生成开始了
+      if (isStart && args[2] === true) return Promise.resolve(); // 本脚本的 dry run：不通知"开始生成"
+      if (event === T.GENERATE_AFTER_DATA && args[1] === true) captured = args[0];
+      return origEmit.apply(this, [event, ...args]);
+    };
+    try {
+      mainWin.Math.random = () => randomValue;
+      await ctx.generate('normal', {}, true);
+    } catch (e) {
+      console.warn(`[${SCRIPT_ID}] 上下文估算失败`, e);
+      captured = null;
+    } finally {
+      restoreRandom();
+      if (hadOwnEmit) es.emit = origEmit; else delete es.emit;
+    }
+    if (!captured) return null;
+    const text = promptToText(captured.prompt);
+    if (!text) return null;
+    return (await countTokens(text)).value;
+  }
+
+  async function runContext() {
+    if (!enabled || !settings.showContext) return;
+    if (ctxRunning) { ctxPending = true; return; }
+    if (realGenerating) return; // 正在真正生成时不打扰，生成结束后会再算
+    ctxRunning = true;
+    renderContext();
+    try {
+      const noneProb = await dryRunOnce(0.999999); // 概率条目都不触发
+      if (noneProb == null) {
+        // 没选角色、还没连接等情况拼不出来：保留上一次结果，从没算出来过就先不显示
+        if (!ctxBase) ctxState = 'unavailable';
+        return;
+      }
+      const allProb = await dryRunOnce(0); // 概率条目都触发
+      ctxBase = { min: Math.min(noneProb, allProb ?? noneProb), max: Math.max(noneProb, allProb ?? noneProb) };
+      ctxState = 'idle';
+    } finally {
+      ctxRunning = false;
+      renderContext();
+      if (ctxPending) { ctxPending = false; scheduleContext(300); }
+    }
+  }
+
+  function scheduleContext(delay = CTX_DEBOUNCE_MS) {
+    if (!enabled || !settings.showContext) return;
+    clearTimeout(ctxTimer);
+    ctxTimer = setTimeout(runContext, delay);
+  }
+
+  // 什么时候重算底数
+  const ctxListeners = [];
+  function bindContextEvents() {
+    const ctx = getCtx();
+    const es = ctx?.eventSource;
+    const T = ctx?.eventTypes;
+    if (!es || !T || typeof es.on !== 'function') return;
+    const on = (name, fn) => { if (T[name]) { es.on(T[name], fn); ctxListeners.push([T[name], fn]); } };
+    const again = () => scheduleContext();
+    ['CHAT_CHANGED', 'MESSAGE_SENT', 'MESSAGE_RECEIVED', 'MESSAGE_EDITED', 'MESSAGE_DELETED', 'MESSAGE_SWIPED',
+      'SETTINGS_UPDATED', 'OAI_PRESET_CHANGED_AFTER', 'WORLDINFO_UPDATED', 'WORLDINFO_SETTINGS_UPDATED', 'CHARACTER_EDITED']
+      .forEach((name) => on(name, again));
+    on('GENERATION_STARTED', (type, params, dryRun) => { if (dryRun !== true) realGenerating = true; });
+    const ended = () => { realGenerating = false; scheduleContext(); };
+    on('GENERATION_ENDED', ended);
+    on('GENERATION_STOPPED', ended);
+  }
+  function unbindContextEvents() {
+    const es = getCtx()?.eventSource;
+    ctxListeners.forEach(([name, fn]) => { try { (es.removeListener || es.off)?.call(es, name, fn); } catch (e) {} });
+    ctxListeners.length = 0;
   }
 
   // ---------- 事件 ----------
   // input 事件管手动输入；focus/blur 管跟随模式在"输入"和"楼层"之间切换；
   // 轮询兜底管程序改值（发送后清空、QR 填入、切换聊天、流式输出等，这些不会触发 input）
-  const onInput = () => updateBadge();
+  const onInput = () => { updateBadge(); updateInputTok(); };
   const onFocusChange = () => setTimeout(() => updateBadge(), 0);
   const onResize = () => positionBadge();
   let scrollRaf = 0;
@@ -1336,6 +1499,7 @@ $(() => {
   const pollTimer = setInterval(() => {
     bindTargets();
     updateBadge();
+    updateInputTok();
   }, POLL_MS);
   const mesPollTimer = setInterval(scanMessages, MES_POLL_MS);
   mainWin.addEventListener('resize', onResize);
@@ -1368,6 +1532,9 @@ $(() => {
     mainDoc.body.classList.remove(MES_ON_CLASS);
   }
   $(window).on('pagehide', () => {
+    clearTimeout(ctxTimer);
+    clearTimeout(inputTokTimer);
+    unbindContextEvents();
     clearInterval(pollTimer);
     clearInterval(mesPollTimer);
     clearTimeout(tokenTimer);
@@ -1387,4 +1554,8 @@ $(() => {
   setupButton();
   updateBadge(true);
   scanMessages();
+  bindContextEvents();
+  updateInputTok();
+  renderContext();
+  scheduleContext(1500);
 });
