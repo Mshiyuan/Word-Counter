@@ -19,6 +19,6 @@
 | --- | --- | --- |
 | `newPromptName` | `新条目` | 新条目的名字，重名自动加编号 |
 | `openEditor` | `true` | 新建后直接打开编辑窗口 |
-| `autoSavePreset` | `true` | 新建后自动保存当前预设 |
+| `autoSavePreset` | `false` | 新建后自动保存当前预设；默认关闭，需要自己手动保存 |
 | `doubleTapMs` | `350` | 两次点击的最大间隔（毫秒） |
 | `moveTolerance` | `10` | 点击时允许的位移（像素），超过就当作拖动 |

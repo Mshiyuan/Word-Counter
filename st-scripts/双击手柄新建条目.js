@@ -6,8 +6,8 @@
         newPromptName: '新条目',
         // 新建后是否直接打开编辑窗口
         openEditor: true,
-        // 新建后是否自动保存当前预设（相当于点一下「保存预设」）
-        autoSavePreset: true,
+        // 新建后是否自动保存当前预设（相当于点一下「保存预设」）；默认不保存，自己手动保存
+        autoSavePreset: false,
         // 两次点击的最大间隔（毫秒）
         doubleTapMs: 350,
         // 单次点击允许的手指/鼠标位移（像素），超过就当作拖动
