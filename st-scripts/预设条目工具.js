@@ -43,6 +43,7 @@
     // 已合并到本脚本的旧脚本。同一页面中仍在运行时先卸载。
     const LEGACY_INSTALL_KEYS = ['__doubleTapNewPromptScript', '__presetVersionMigrateScript'];
     const BAIBAI_STATE_KEY = '__baiBaiToolkitExtensionInstalled';
+    const BAIBAI_VUE_LIST_KEY = '__baiBaiToolkitPresetVueListManager';
     const STYLE_ID = 'preset-entry-tools-style';
     const BAR_ID = 'preset-entry-tools-profile-bar';
     const PANEL_ID = 'preset-entry-tools-settings';
@@ -348,6 +349,15 @@
     let lastTap = null;
     let lastTriggerAt = 0;
     let insertBusy = false;
+    // 第二次点击的按下事件不传给拖动库的截止时间。见 onPointerDown。
+    let suppressGestureUntil = 0;
+
+    function isSecondTap(row, event) {
+        return Boolean(lastTap
+            && lastTap.id === row.dataset.pmIdentifier
+            && Date.now() - lastTap.time <= CONFIG.doubleTapMs
+            && Math.hypot(event.clientX - lastTap.x, event.clientY - lastTap.y) <= CONFIG.moveTolerance * 2);
+    }
 
     function onPointerDown(event) {
         if (event.isPrimary === false || (event.pointerType === 'mouse' && event.button !== 0)) {
@@ -359,6 +369,20 @@
         pointerDown = row
             ? { row, id: row.dataset.pmIdentifier, x: event.clientX, y: event.clientY, pointerId: event.pointerId }
             : null;
+
+        // 第二次点击不传给拖动库。否则拖动库会将其视为一次拖放，
+        // BaiBai 随即按其列表模型重写条目顺序；若此时新条目已插入而模型尚未更新，新条目会被移出顺序。
+        if (row && getSettings().doubleTapEnabled && isSecondTap(row, event)) {
+            suppressGestureUntil = Date.now() + 800;
+            event.stopImmediatePropagation();
+        }
+    }
+
+    // 拖动库在部分浏览器上监听 touchstart 或 mousedown 而非 pointerdown，同样拦截
+    function onLegacyPointerStart(event) {
+        if (Date.now() < suppressGestureUntil && getTargetRow(event.target)) {
+            event.stopImmediatePropagation();
+        }
     }
 
     function onPointerUp(event) {
@@ -430,6 +454,8 @@
                 return;
             }
 
+            await waitForBaiBaiDragIdle();
+
             const order = pm.getPromptOrderForCharacter(pm.activeCharacter);
             const orderIndex = Array.isArray(order) ? order.findIndex(entry => entry?.identifier === sourceId) : -1;
 
@@ -462,7 +488,7 @@
 
             order.splice(orderIndex + 1, 0, toParent({ identifier: id, enabled: true }));
 
-            const groupName = assignDoubleTapGroup(oai, sourceId, id, groupIdFromRow);
+            const groupId = assignDoubleTapGroup(oai, sourceId, id, groupIdFromRow);
             const counts = pm.tokenHandler?.getCounts?.();
 
             if (counts && typeof counts === 'object') {
@@ -481,7 +507,7 @@
                 pdoc.getElementById('update_oai_preset')?.click();
             }
 
-            notify?.success(groupName ? `已在分组「${groupName}」中新建条目。` : '已新建条目。');
+            guardInsertedPrompt(oai, id, sourceId, groupId);
 
             const newRow = await waitForRow(id);
             newRow?.scrollIntoView?.({ block: 'nearest' });
@@ -497,7 +523,7 @@
         }
     }
 
-    // 将新条目加入被双击条目所在的 BaiBai 分组
+    // 将新条目加入被双击条目所在的 BaiBai 分组，返回分组 id
     function assignDoubleTapGroup(oai, sourceId, newId, groupIdFromRow) {
         const groupState = readLiveGroupState(oai.oai_settings?.preset_settings_openai || 'current');
 
@@ -513,7 +539,52 @@
         }
 
         groupState.prompts[newId] = toParent({ groupId: groupIdFromRow });
-        return String(group.name || '未命名分组');
+        return groupIdFromRow;
+    }
+
+    // 等待 BaiBai 的拖动及其顺序保存结束，最长 1.5 秒
+    async function waitForBaiBaiDragIdle() {
+        const deadline = Date.now() + 1500;
+
+        do {
+            await waitFrames(2);
+
+            const manager = pwin[BAIBAI_STATE_KEY]?.[BAIBAI_VUE_LIST_KEY];
+            const busy = Boolean(manager?.state?.dragging
+                || manager?.saveTimer != null
+                || manager?.saveFrame != null);
+
+            if (!busy) {
+                return;
+            }
+        } while (Date.now() < deadline);
+    }
+
+    // 新建后的 3 秒内检查新条目是否仍在顺序中。若被其他脚本移出，按原位置放回。
+    function guardInsertedPrompt(oai, id, sourceId, groupId) {
+        const check = () => {
+            const pm = oai.promptManager;
+            const order = pm.getPromptOrderForCharacter(pm.activeCharacter);
+
+            if (!pm.getPromptById?.(id) || order.some(entry => entry?.identifier === id)) {
+                return;
+            }
+
+            const sourceIndex = order.findIndex(entry => entry?.identifier === sourceId);
+            order.splice(sourceIndex >= 0 ? sourceIndex + 1 : order.length, 0, toParent({ identifier: id, enabled: true }));
+
+            const groupState = readLiveGroupState(oai.oai_settings?.preset_settings_openai || 'current');
+
+            if (groupId && groupState?.groups.some(group => group?.id === groupId)) {
+                groupState.prompts[id] = toParent({ groupId });
+            }
+
+            console.warn('[预设条目工具] 新条目被移出顺序，已放回原位置', id);
+            pm.render?.();
+            void pm.saveServiceSettings?.();
+        };
+
+        [300, 1000, 3000].forEach(delay => pwin.setTimeout(check, delay));
     }
 
     function openEditor(pm, prompt, row) {
@@ -1715,6 +1786,7 @@
     // =====================================================================
 
     const listenerOptions = { capture: true, passive: true };
+    const legacyStartEvents = ['touchstart', 'mousedown'];
     const context = getContext();
     const eventSource = context.eventSource;
     const eventTypes = context.eventTypes ?? {};
@@ -1730,6 +1802,7 @@
     pwin.addEventListener('pointerup', onPointerUp, listenerOptions);
     pwin.addEventListener('pointercancel', onPointerCancel, listenerOptions);
     pwin.addEventListener('dblclick', onDoubleClick, listenerOptions);
+    legacyStartEvents.forEach(type => pwin.addEventListener(type, onLegacyPointerStart, listenerOptions));
     eventHandlers.forEach(([type, handler]) => eventSource?.on(type, handler));
 
     if (typeof eventOn === 'function' && typeof getButtonEvent === 'function') {
@@ -1756,6 +1829,7 @@
         pwin.removeEventListener('pointerup', onPointerUp, listenerOptions);
         pwin.removeEventListener('pointercancel', onPointerCancel, listenerOptions);
         pwin.removeEventListener('dblclick', onDoubleClick, listenerOptions);
+        legacyStartEvents.forEach(type => pwin.removeEventListener(type, onLegacyPointerStart, listenerOptions));
         eventHandlers.forEach(([type, handler]) => eventSource?.removeListener(type, handler));
         pwin.clearInterval(barTimer);
         containerObserver?.disconnect();
