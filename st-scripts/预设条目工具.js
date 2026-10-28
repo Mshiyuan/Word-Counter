@@ -225,6 +225,31 @@
         return groupId ? (groupState.groups.find(group => group?.id === groupId)?.name ?? null) : null;
     }
 
+    // BaiBai 在条目开关、顺序或分组变化时保存一份快照（prompt_order 与分组数据），
+    // 之后在打开编辑、保存预设等时机用快照替换内存中的数据。
+    // 快照若早于本脚本的修改，替换时会撤销本脚本的修改（例如新建的条目被移出顺序）。
+    // 因此本脚本每次修改后，将已有的快照更新为当前状态。没有快照时不做处理。
+    function refreshBaiBaiPendingSnapshots(oai) {
+        const manager = pwin[BAIBAI_STATE_KEY]?.[BAIBAI_VUE_LIST_KEY];
+        const presetName = oai.oai_settings?.preset_settings_openai || 'current';
+        const serviceEntry = manager?.pendingPresetPromptServiceSaves?.get?.(presetName);
+        const groupEntry = manager?.pendingPresetPromptGroupSaves?.get?.(presetName);
+        const liveGroupState = readLiveGroupState(presetName);
+
+        if (serviceEntry) {
+            serviceEntry.promptOrder = toParent(oai.promptManager?.serviceSettings?.prompt_order ?? oai.oai_settings.prompt_order);
+        }
+
+        if (groupEntry?.groupState && liveGroupState) {
+            groupEntry.groupState = toParent({
+                ...groupEntry.groupState,
+                groups: liveGroupState.groups,
+                prompts: liveGroupState.prompts,
+            });
+            groupEntry.syncKey = `${presetName}:${JSON.stringify(groupEntry.groupState)}`;
+        }
+    }
+
     // ---------- 界面工具 ----------
 
     function injectStyle() {
@@ -489,6 +514,7 @@
             order.splice(orderIndex + 1, 0, toParent({ identifier: id, enabled: true }));
 
             const groupId = assignDoubleTapGroup(oai, sourceId, id, groupIdFromRow);
+            refreshBaiBaiPendingSnapshots(oai);
             const counts = pm.tokenHandler?.getCounts?.();
 
             if (counts && typeof counts === 'object') {
@@ -579,6 +605,7 @@
                 groupState.prompts[id] = toParent({ groupId });
             }
 
+            refreshBaiBaiPendingSnapshots(oai);
             console.warn('[预设条目工具] 新条目被移出顺序，已放回原位置', id);
             pm.render?.();
             void pm.saveServiceSettings?.();
@@ -1106,6 +1133,7 @@
             }
 
             const summary = applyMigration(result.diff, result.selection, target);
+            refreshBaiBaiPendingSnapshots(oai);
             const counts = pm.tokenHandler?.getCounts?.();
 
             for (const id of summary.insertedIds) {
@@ -1257,6 +1285,7 @@
         changed += changedGroups.size;
 
         if (changed) {
+            refreshBaiBaiPendingSnapshots(oai);
             pm.render?.();
             void pm.saveServiceSettings?.();
         }
