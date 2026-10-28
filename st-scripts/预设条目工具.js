@@ -31,6 +31,8 @@
         doubleTapEnabled: true,
         importCompareEnabled: true,
         profilesEnabled: true,
+        // 切换角色、聊天存档或预设时自动套用方案；关闭时需在方案栏点击「套用」
+        autoApply: true,
         // 未记录开关的取值来源：'saved' 为预设上次保存的状态，'previous' 为保持切换前的状态
         defaultSource: 'saved',
         confirmNewEntries: true,
@@ -1067,6 +1069,7 @@
     //     'previous' 保持切换前的开关（即不修改）。
     //   未使用方案时，目标开关即为默认值。
     //   当前预设没有任何方案时，不修改开关。
+    //   设置 autoApply 关闭时，切换时不套用，仅在方案栏点击「套用」或在下拉框中选择方案时套用。
 
     let oaiModule = null;
     // 每次套用递增。弹窗关闭时若该值已变化，说明期间切换过角色、聊天存档或预设，弹窗结果作废。
@@ -1246,7 +1249,8 @@
         return { oai, presetName, scope, ready, store: ready ? getPresetStore(presetName, false) : null };
     }
 
-    async function applyProfileForCurrentChat({ announce = true } = {}) {
+    // announce：开关有变化时提示；manual：由用户操作触发，无论有无变化都提示结果
+    async function applyProfileForCurrentChat({ announce = true, manual = false } = {}) {
         const sequence = ++applySequence;
         const settings = getSettings();
         const { oai, presetName, scope, ready, store } = getProfileState();
@@ -1257,6 +1261,10 @@
 
         // 当前预设没有任何方案时不做处理，以免影响不使用本功能时的手动开关
         if (!store || !Object.keys(store.profiles).length) {
+            if (manual) {
+                notify?.info('当前预设没有方案，条目开关未修改。');
+            }
+
             return;
         }
 
@@ -1265,11 +1273,15 @@
         const changed = applyStates(oai, getTargetStates(oai, presetName, profile));
 
         if (!profile) {
+            if (manual) {
+                notify?.info(changed ? `已按默认值设置 ${changed} 项开关。` : '条目开关已是默认值，未修改。');
+            }
+
             return;
         }
 
-        if (changed && announce) {
-            notify?.info(`已套用条目方案「${profile.name}」。`);
+        if (manual || (changed && announce)) {
+            notify?.info(changed ? `已套用条目方案「${profile.name}」，修改 ${changed} 项开关。` : `条目开关与方案「${profile.name}」一致，未修改。`);
         }
 
         const unrecorded = getUnrecordedEntries(oai, profile);
@@ -1343,11 +1355,15 @@
             el('i', { className: 'fa-solid fa-floppy-disk' }),
             el('span', { text: ' 当前角色保存为…' }),
         ]);
+        const applyButton = el('div', { className: 'menu_button pet-bar-apply', title: '按当前绑定套用条目开关' }, [
+            el('i', { className: 'fa-solid fa-check' }),
+            el('span', { text: ' 套用' }),
+        ]);
         const deleteButton = el('div', { className: 'menu_button pet-bar-delete fa-solid fa-trash-can', title: '删除所选方案' });
         const chatBox = el('input', { type: 'checkbox' });
         const bar = el('div', { id: BAR_ID }, [
             el('div', { className: 'pet-bar-title' }, [el('i', { className: 'fa-solid fa-masks-theater' }), title]),
-            el('div', { className: 'pet-bar-row' }, [select, saveButton, deleteButton]),
+            el('div', { className: 'pet-bar-row' }, [select, applyButton, saveButton, deleteButton]),
             el('label', {
                 className: 'checkbox_label pet-bar-chat',
                 title: '勾选：下拉框中的选择仅绑定到当前聊天存档。不勾选：绑定到角色，适用于该角色所有未单独绑定的聊天存档。',
@@ -1356,6 +1372,7 @@
 
         select.addEventListener('change', () => onProfileSelected(select.value, chatBox.checked));
         chatBox.addEventListener('change', () => onChatLevelToggled(chatBox.checked, select.value));
+        applyButton.addEventListener('click', () => void applyProfileForCurrentChat({ manual: true }));
         saveButton.addEventListener('click', () => void saveCurrentAsProfile(select.value, chatBox.checked));
         deleteButton.addEventListener('click', () => void deleteProfile(select.value));
 
@@ -1399,6 +1416,9 @@
         select.disabled = !ready;
         chatBox.checked = binding.chatLevel;
         chatBox.disabled = !ready || !scope.chatId;
+        // 「套用」按钮仅在关闭自动套用时显示
+        bar.querySelector('.pet-bar-apply').style.display = getSettings().autoApply ? 'none' : '';
+        bar.querySelector('.pet-bar-apply').classList.toggle('disabled', !ready);
         bar.querySelector('.pet-bar-save').classList.toggle('disabled', !ready);
         bar.querySelector('.pet-bar-delete').classList.toggle('disabled', !ready || !binding.profileId);
         bar.title = presetName ? `方案按预设分别保存。当前预设：${presetName}` : '';
@@ -1447,7 +1467,7 @@
         saveSettings();
         updateProfileBar();
 
-        if (!chatLevel) {
+        if (!chatLevel && getSettings().autoApply) {
             void applyProfileForCurrentChat();
         }
     }
@@ -1583,7 +1603,10 @@
     function onChatOrPresetChanged() {
         ensureProfileBar();
         updateProfileBar();
-        void applyProfileForCurrentChat();
+
+        if (getSettings().autoApply) {
+            void applyProfileForCurrentChat();
+        }
     }
 
     // 预设重命名时，方案数据随之迁移到新名称下
@@ -1667,8 +1690,14 @@
                         '在「提示词」标题上方显示方案栏。条目开关可保存为方案并绑定到角色或聊天存档，切换时自动套用。方案按预设分别保存。',
                         () => {
                             ensureProfileBar();
-                            void applyProfileForCurrentChat();
+
+                            if (getSettings().autoApply) {
+                                void applyProfileForCurrentChat();
+                            }
                         }),
+                    checkboxOption('autoApply', '切换时自动套用方案',
+                        '开启：切换角色、聊天存档或预设时自动套用对应的方案。关闭：切换时不修改条目开关，需在方案栏点击「套用」。在下拉框中选择方案时始终立即套用。',
+                        () => updateProfileBar()),
                     selectOption('defaultSource', '默认值（未记录的条目开关）', [
                         ['saved', '预设上次保存的状态'],
                         ['previous', '沿用上一个角色的状态'],
