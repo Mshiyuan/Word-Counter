@@ -1,25 +1,28 @@
-// 酒馆助手脚本「预设条目工具」，兼容 ST-BaiBai-Tools 的预设分组：
-// 1. 双击条目最前面的「☰」，在下面新建一个空条目；
-// 2. 导入同一个预设的新版本时，列出旧版独有（比如自己缝的）或内容不同的条目，勾选后放进新预设里和旧版相同的位置；
-// 3. 角色条目方案：把条目开关保存给角色或某个聊天存档，切换时自动套用。
-// 开关在「扩展」页面的「预设条目工具」里。
+// 酒馆助手脚本「预设条目工具」
+// 功能：
+//   1. 双击新建：双击条目左侧的「☰」拖动手柄，在该条目下方新建空条目。
+//   2. 版本对比：导入预设时，若检测到同一预设的旧版本，列出仅存在于旧版本的条目和内容不同的条目，
+//      所选条目插入新预设中与旧版本相同的位置。
+//   3. 条目方案：将条目开关保存为方案，绑定到角色或聊天存档，切换时自动套用。
+// 各功能可在「扩展」页面的「预设条目工具」中启用或停用。
+// 兼容 ST-BaiBai-Tools 的预设分组。
 (() => {
     const CONFIG = {
-        // 双击新建：新条目的默认名字，重名时会自动加上编号
+        // 双击新建：新条目的名称。名称重复时自动追加编号。
         newPromptName: '新条目',
-        // 双击新建：新建后是否直接打开编辑窗口
+        // 双击新建：新建后是否打开编辑窗口。
         openEditor: true,
-        // 双击新建：新建后是否自动保存当前预设；默认不保存，自己手动保存
+        // 双击新建：新建后是否自动保存当前预设。
         autoSavePreset: false,
-        // 双击新建：两次点击的最大间隔（毫秒）
+        // 双击新建：两次点击的最大间隔（毫秒）。
         doubleTapMs: 350,
-        // 双击新建：单次点击允许的手指/鼠标位移（像素），超过就当作拖动
+        // 双击新建：单次点击允许的最大位移（像素），超出视为拖动。
         moveTolerance: 10,
-        // 对比旧版：名字对不上时，至少要有这么多相同的自定义条目才算同一个预设
+        // 版本对比：名称不匹配时，判定为同一预设所需的最少相同自定义条目数。
         minSharedCustomPrompts: 3,
-        // 对比旧版：名字对不上时，相同自定义条目占比至少这么多才算同一个预设
+        // 版本对比：名称不匹配时，判定为同一预设所需的相同自定义条目最低占比。
         minOverlapRatio: 0.5,
-        // 对比旧版：内容预览最多显示多少字
+        // 版本对比：内容预览的最大字数。
         previewChars: 2000,
     };
 
@@ -28,11 +31,14 @@
         doubleTapEnabled: true,
         importCompareEnabled: true,
         profilesEnabled: true,
-        restoreBaselineEnabled: true,
+        // 未记录开关的取值来源：'saved' 为预设上次保存的状态，'previous' 为保持切换前的状态
+        defaultSource: 'saved',
+        confirmNewEntries: true,
     };
-    const BUTTON_NAME = '对比旧版预设';
+    const DEFAULT_SOURCES = ['saved', 'previous'];
+    const BUTTON_NAME = '对比旧版本预设';
     const INSTALL_KEY = '__presetEntryToolsScript';
-    // 合并之前的两个旧脚本，同一页面里还在的话先卸掉
+    // 已合并到本脚本的旧脚本。同一页面中仍在运行时先卸载。
     const LEGACY_INSTALL_KEYS = ['__doubleTapNewPromptScript', '__presetVersionMigrateScript'];
     const BAIBAI_STATE_KEY = '__baiBaiToolkitExtensionInstalled';
     const STYLE_ID = 'preset-entry-tools-style';
@@ -40,7 +46,7 @@
     const PANEL_ID = 'preset-entry-tools-settings';
     const ROW_SELECTOR = '#completion_prompt_manager_list li.completion_prompt_manager_prompt[data-pm-identifier]';
     const GLOBAL_ORDER_ID = '100001';
-    // 酒馆自带的条目，所有预设都有，不能拿来判断是不是同一个预设
+    // SillyTavern 内置条目。所有预设都包含这些条目，不参与同一预设的判定。
     const BUILTIN_IDS = new Set([
         'main', 'nsfw', 'jailbreak', 'enhanceDefinitions', 'worldInfoBefore', 'worldInfoAfter',
         'charDescription', 'charPersonality', 'scenario', 'personaDescription', 'dialogueExamples', 'chatHistory',
@@ -68,15 +74,15 @@
     const pdoc = pwin.document;
     const notify = pwin.toastr ?? window.toastr;
 
-    // 重复加载脚本时先卸掉旧的
+    // 重复加载时先卸载上一次的实例
     pwin[INSTALL_KEY]?.uninstall?.();
     LEGACY_INSTALL_KEYS.forEach(key => pwin[key]?.uninstall?.());
 
-    // ---------- 酒馆模块 / 设置 ----------
+    // ---------- SillyTavern 模块与设置 ----------
 
     const moduleCache = new Map();
 
-    // 在酒馆主页面里 import，拿到的才是酒馆正在用的同一份模块
+    // 在主页面中导入模块，以取得 SillyTavern 正在使用的同一模块实例
     function importFromTavern(path) {
         if (!moduleCache.has(path)) {
             const url = new URL(path, pdoc.baseURI).href;
@@ -95,7 +101,7 @@
     const loadPopup = () => importFromTavern('scripts/popup.js');
     const getContext = () => pwin.SillyTavern.getContext();
 
-    // 放进酒馆数据里的对象都在主页面里创建，免得跨 iframe 的对象出怪问题
+    // 写入 SillyTavern 数据的对象在主页面中创建，避免跨 iframe 的对象引用
     const toParent = value => pwin.structuredClone(value);
 
     function getSettings() {
@@ -107,10 +113,23 @@
 
         const settings = extensionSettings[SETTINGS_KEY];
 
+        // 旧版设置项 restoreBaselineEnabled 迁移为 defaultSource
+        if ('restoreBaselineEnabled' in settings) {
+            if (!DEFAULT_SOURCES.includes(settings.defaultSource)) {
+                settings.defaultSource = settings.restoreBaselineEnabled === false ? 'previous' : 'saved';
+            }
+
+            delete settings.restoreBaselineEnabled;
+        }
+
         for (const [key, value] of Object.entries(DEFAULT_SETTINGS)) {
-            if (typeof settings[key] !== 'boolean') {
+            if (typeof settings[key] !== typeof value) {
                 settings[key] = value;
             }
+        }
+
+        if (!DEFAULT_SOURCES.includes(settings.defaultSource)) {
+            settings.defaultSource = DEFAULT_SETTINGS.defaultSource;
         }
 
         if (!settings.presets || typeof settings.presets !== 'object') {
@@ -140,7 +159,7 @@
         return Object.keys(oai.openai_setting_names ?? {});
     }
 
-    // 当前正在用的预设读实时数据（包括还没保存的改动），其他预设读已保存的
+    // 当前预设返回实时数据（含未保存的修改），其他预设返回已保存的数据
     function getPresetData(oai, name) {
         if (name === oai.oai_settings?.preset_settings_openai) {
             return oai.oai_settings;
@@ -161,7 +180,7 @@
             return null;
         }
 
-        // 极老的预设直接把顺序平铺在 prompt_order 里
+        // 早期格式：prompt_order 直接存放条目顺序
         if (lists[0] && 'identifier' in lists[0]) {
             return lists;
         }
@@ -192,7 +211,7 @@
         return Boolean(value && Array.isArray(value.groups) && value.prompts && typeof value.prompts === 'object');
     }
 
-    // 当前预设的分组：BaiBai 正在用的那份，加上写在预设里的那份（两份可能是同一个对象）
+    // 当前预设的分组数据：BaiBai 运行中的副本与预设 extensions 中的副本（可能为同一对象）
     function getCurrentGroupStates(oai) {
         const presetName = oai.oai_settings?.preset_settings_openai;
         return [...new Set([readLiveGroupState(presetName), readGroupStateFromPreset(oai.oai_settings)].filter(Boolean))];
@@ -203,7 +222,7 @@
         return groupId ? (groupState.groups.find(group => group?.id === groupId)?.name ?? null) : null;
     }
 
-    // ---------- 界面小工具 ----------
+    // ---------- 界面工具 ----------
 
     function injectStyle() {
         pdoc.getElementById(STYLE_ID)?.remove();
@@ -242,6 +261,8 @@
 
 #${PANEL_ID} .pet-panel-option { margin-top: 6px; }
 #${PANEL_ID} .pet-panel-hint { opacity: 0.7; font-size: 0.85em; margin: 2px 0 0 24px; }
+#${PANEL_ID} .pet-panel-select { display: flex; flex-direction: column; gap: 4px; }
+#${PANEL_ID} .pet-panel-select .pet-panel-hint { margin-left: 0; }
 #${PANEL_ID} .menu_button { width: auto; margin-top: 10px; }
 `;
         pdoc.head.append(style);
@@ -271,14 +292,47 @@
         });
     }
 
+    // 带「全选 / 全不选」的勾选列表
+    function renderSection({ title, hint, items, renderItem, emptyText, isChecked = () => false }) {
+        const boxes = [];
+        const list = el('div');
+
+        for (const item of items) {
+            const box = el('input', { type: 'checkbox' });
+            box.checked = isChecked(item);
+            boxes.push({ box, item });
+            list.append(renderItem(item, box));
+        }
+
+        const setAll = checked => boxes.forEach(({ box }) => { box.checked = checked; });
+        const actions = items.length
+            ? el('span', { className: 'pvm-section-actions' }, [
+                el('span', { className: 'menu_button', text: '全选' }),
+                el('span', { className: 'menu_button', text: '全不选' }),
+            ])
+            : null;
+
+        actions?.children[0].addEventListener('click', () => setAll(true));
+        actions?.children[1].addEventListener('click', () => setAll(false));
+
+        const section = el('div', { className: 'pvm-section' }, [
+            el('div', { className: 'pvm-section-title' }, [el('span', { text: `${title}（${items.length}）` }), actions]),
+            hint ? el('div', { className: 'pvm-hint', text: hint }) : null,
+            items.length ? list : el('div', { className: 'pvm-empty', text: emptyText }),
+        ]);
+
+        return { section, getChecked: () => boxes.filter(({ box }) => box.checked).map(({ item }) => item) };
+    }
+
     // =====================================================================
-    // 1. 双击「☰」新建条目
+    // 1. 双击新建
     // =====================================================================
 
     function getTargetRow(target) {
         const handle = target?.closest?.('.drag-handle');
         const row = handle?.closest(ROW_SELECTOR);
 
+        // 排除 BaiBai 收藏区的镜像条目和全局库条目
         if (!row
             || row.dataset.presetFavoriteMirror === 'true'
             || row.classList.contains('bai-bai-preset-global-library-prompt')) {
@@ -337,7 +391,7 @@
         lastTap = null;
     }
 
-    // 兜底：有些环境下 pointer 事件被拦，退回浏览器自己的 dblclick
+    // 备用触发方式：pointer 事件被其他脚本拦截时，使用浏览器的 dblclick 事件
     function onDoubleClick(event) {
         const row = getTargetRow(event.target);
 
@@ -370,7 +424,7 @@
             const pm = oai.promptManager;
 
             if (!pm?.activeCharacter || !Array.isArray(pm.serviceSettings?.prompts)) {
-                notify?.warning('预设管理器还没准备好，稍后再试。');
+                notify?.warning('预设管理器尚未就绪，请稍后重试。');
                 return;
             }
 
@@ -378,7 +432,7 @@
             const orderIndex = Array.isArray(order) ? order.findIndex(entry => entry?.identifier === sourceId) : -1;
 
             if (orderIndex < 0) {
-                notify?.warning('这个条目不在当前列表里。');
+                notify?.warning('该条目不在当前条目列表中。');
                 return;
             }
 
@@ -415,10 +469,10 @@
 
             pm.log?.(`Double-tap created prompt: ${id} after ${sourceId}`);
 
-            // BaiBai 的分组会在重新渲染时把分组数据同步进预设的 extensions，所以先渲染再保存
+            // BaiBai 在重新渲染时将分组数据同步到预设 extensions，因此先渲染后保存
             await pm.render?.();
             await waitFrames(2);
-            // 这个 Promise 要等酒馆存完设置才会结束，存失败就一直不结束，所以不等它
+            // 该 Promise 在设置保存完成后才结束，保存失败时不会结束，因此不等待
             void pm.saveServiceSettings?.();
 
             if (CONFIG.autoSavePreset) {
@@ -435,17 +489,17 @@
             }
         } catch (error) {
             console.error('[预设条目工具] 新建条目失败', error);
-            notify?.error('新建条目失败，详情见控制台。');
+            notify?.error('新建条目失败。详细信息见浏览器控制台。');
         } finally {
             insertBusy = false;
         }
     }
 
-    // 把新条目放进被双击条目所在的 BaiBai 分组
+    // 将新条目加入被双击条目所在的 BaiBai 分组
     function assignDoubleTapGroup(oai, sourceId, newId, groupIdFromRow) {
         const groupState = readLiveGroupState(oai.oai_settings?.preset_settings_openai || 'current');
 
-        // 只有分组功能开着、列表按分组渲染时，行上才有 data-preset-group-id
+        // 仅当 BaiBai 分组功能启用并按分组渲染列表时，条目行上才有 data-preset-group-id
         if (!groupState || !groupIdFromRow || groupState.prompts[sourceId]?.groupId !== groupIdFromRow) {
             return null;
         }
@@ -512,9 +566,10 @@
     }
 
     // =====================================================================
-    // 2. 导入新版本时对比旧版
+    // 2. 版本对比
     // =====================================================================
 
+    // 去除名称中的版本号与版本标记，用于判断两个预设是否为同一预设的不同版本
     function getVersionlessName(name) {
         return String(name ?? '')
             .normalize('NFKC')
@@ -552,11 +607,11 @@
                 name,
                 likely: sameName || sameBase || similar,
                 score: (sameName ? 3000 : 0) + (sameBase ? 2000 : 0) + ratio * 1000 + shared,
-                reason: sameName ? '同名的旧预设' : sameBase ? '名字只差版本号' : similar ? `有 ${shared} 个相同条目` : '',
+                reason: sameName ? '同名预设' : sameBase ? '名称仅版本号不同' : similar ? `${shared} 个相同条目` : '',
             });
         }
 
-        // 分数一样时（比如好几个旧版本），优先版本号大的
+        // 得分相同时，版本号较大的排在前面
         return candidates.sort((a, b) => b.score - a.score
             || b.name.localeCompare(a.name, undefined, { numeric: true }));
     }
@@ -570,6 +625,7 @@
         return Object.keys(COMPARE_FIELDS).filter(field => normalizeField(oldPrompt, field) !== normalizeField(newPrompt, field));
     }
 
+    // 条目先按 identifier 匹配，未匹配时按名称匹配
     function buildDiff(oldPreset, oldGroupState, target) {
         const oldOrder = getOrderList(oldPreset) ?? [];
         const oldPrompts = new Map((oldPreset.prompts ?? []).filter(p => p?.identifier).map(p => [p.identifier, p]));
@@ -631,7 +687,8 @@
         return null;
     }
 
-    // 找旧版里离它最近、新版里也有的条目当锚点，放在它后面；前面没有就放在后面那个的前面
+    // 插入位置：旧版本中位于其前方、且新预设中也存在的最近条目之后；
+    // 前方没有此类条目时，插入到后方最近条目之前；都没有时追加到末尾。
     function findInsertIndex(diff, oldIndex, order) {
         const positionOf = oldId => {
             const id = diff.matchOf.get(oldId) ?? oldId;
@@ -657,7 +714,8 @@
         return order.length;
     }
 
-    // 夹在同一个分组中间就必须进这个分组；在分组边上时，旧版里同名的分组才进
+    // 分组规则：前后条目属于同一分组时加入该分组；
+    // 位于分组边界时，仅当旧版本中所属分组与相邻分组同名才加入。
     function assignMigratedGroup(target, position, promptId, oldGroupName) {
         const primary = target.groupStates[0];
 
@@ -696,7 +754,7 @@
         const selectedAdded = new Set(selection.added);
         const insertedIds = [];
 
-        // 按旧版顺序一个个放，连着的几条自缝条目会保持原来的先后
+        // 按旧版本顺序依次插入，使连续的多个条目保持原有先后顺序
         for (const item of diff.added) {
             if (!selectedAdded.has(item)) {
                 continue;
@@ -731,45 +789,15 @@
         }
 
         return value.length > CONFIG.previewChars
-            ? `${value.slice(0, CONFIG.previewChars)}…（后面还有 ${value.length - CONFIG.previewChars} 字）`
+            ? `${value.slice(0, CONFIG.previewChars)}…（另有 ${value.length - CONFIG.previewChars} 字未显示）`
             : value;
-    }
-
-    function renderSection({ title, hint, items, renderItem, emptyText }) {
-        const boxes = [];
-        const list = el('div');
-
-        for (const item of items) {
-            const box = el('input', { type: 'checkbox' });
-            boxes.push({ box, item });
-            list.append(renderItem(item, box));
-        }
-
-        const setAll = checked => boxes.forEach(({ box }) => { box.checked = checked; });
-        const actions = items.length
-            ? el('span', { className: 'pvm-section-actions' }, [
-                el('span', { className: 'menu_button', text: '全选' }),
-                el('span', { className: 'menu_button', text: '全不选' }),
-            ])
-            : null;
-
-        actions?.children[0].addEventListener('click', () => setAll(true));
-        actions?.children[1].addEventListener('click', () => setAll(false));
-
-        const section = el('div', { className: 'pvm-section' }, [
-            el('div', { className: 'pvm-section-title' }, [el('span', { text: `${title}（${items.length}）` }), actions]),
-            hint ? el('div', { className: 'pvm-hint', text: hint }) : null,
-            items.length ? list : el('div', { className: 'pvm-empty', text: emptyText }),
-        ]);
-
-        return { section, getChecked: () => boxes.filter(({ box }) => box.checked).map(({ item }) => item) };
     }
 
     function renderAddedItem(item, box) {
         const meta = [
-            item.afterName ? `原来在「${item.afterName}」后面` : '原来在最前面',
-            item.oldGroupName ? `分组「${item.oldGroupName}」` : '',
-            item.enabled ? '' : '原来是关闭的',
+            item.afterName ? `位置：「${item.afterName}」之后` : '位置：列表开头',
+            item.oldGroupName ? `分组：${item.oldGroupName}` : '',
+            item.enabled ? '' : '旧版本中为关闭状态',
         ].filter(Boolean).join(' · ');
 
         return el('div', { className: 'pvm-item' }, [
@@ -789,8 +817,8 @@
 
     function renderChangedItem(item, box) {
         const meta = [
-            `不同：${item.fields.map(field => FIELD_LABELS[field]).join('、')}`,
-            item.oldPrompt.name !== item.newPrompt.name ? `新版叫「${item.newPrompt.name}」` : '',
+            `差异：${item.fields.map(field => FIELD_LABELS[field]).join('、')}`,
+            item.oldPrompt.name !== item.newPrompt.name ? `新版本名称：${item.newPrompt.name}` : '',
         ].filter(Boolean).join(' · ');
 
         return el('div', { className: 'pvm-item' }, [
@@ -803,15 +831,15 @@
             ]),
             el('details', {}, [
                 el('summary', { text: '对比内容' }),
-                el('div', { className: 'pvm-hint', text: '旧版：' }),
+                el('div', { className: 'pvm-hint', text: '旧版本：' }),
                 el('div', { className: 'pvm-pre', text: preview(item.oldPrompt.content) }),
-                el('div', { className: 'pvm-hint', text: '新版：' }),
+                el('div', { className: 'pvm-hint', text: '新版本：' }),
                 el('div', { className: 'pvm-pre', text: preview(item.newPrompt.content) }),
             ]),
         ]);
     }
 
-    // 弹出对比窗口；确认后返回 { diff, selection, oldName }，取消返回 null
+    // 显示对比窗口。确认时返回 { diff, selection, oldName }，取消时返回 null。
     async function showCompareDialog({ mode, targetName, target, candidates, getOldPreset }) {
         const { callGenericPopup, POPUP_TYPE, POPUP_RESULT } = await loadPopup();
         const root = el('div', { className: 'pvm-root' });
@@ -832,18 +860,18 @@
             const { preset, groupState } = getOldPreset(oldName);
             const diff = buildDiff(preset, groupState, target);
             const addedSection = renderSection({
-                title: '旧版独有的条目',
-                hint: '勾选的条目会放进新预设里和旧版相同的位置。',
+                title: '仅存在于旧版本的条目',
+                hint: '勾选的条目将插入新预设中与旧版本相同的位置。',
                 items: diff.added,
                 renderItem: renderAddedItem,
-                emptyText: '没有旧版独有的条目。',
+                emptyText: '无。',
             });
             const changedSection = renderSection({
-                title: '两边都有、但内容不同的条目',
-                hint: '勾选 = 用旧版的内容覆盖新版。没改过作者的条目就不用勾。',
+                title: '两个版本中设置不同的条目',
+                hint: '勾选的条目将以旧版本的设置覆盖新版本。',
                 items: diff.changed,
                 renderItem: renderChangedItem,
-                emptyText: '没有内容不同的条目。',
+                emptyText: '无。',
             });
 
             sectionsHost.replaceChildren(addedSection.section, changedSection.section);
@@ -854,14 +882,14 @@
 
         root.append(
             el('div', { className: 'pvm-head' }, [
-                el('div', { className: 'pvm-name', text: mode === 'import' ? `正在导入「${targetName}」` : `当前预设「${targetName}」` }),
-                el('div', { className: 'pvm-hint', text: '和这个旧预设对比：' }),
+                el('div', { className: 'pvm-name', text: mode === 'import' ? `导入预设：${targetName}` : `当前预设：${targetName}` }),
+                el('div', { className: 'pvm-hint', text: '对比对象（旧版本预设）：' }),
                 select,
                 el('div', {
                     className: 'pvm-hint',
                     text: mode === 'import'
-                        ? '确认后条目会合并进导入的新预设，酒馆导入时会直接保存它；旧预设不会被改动。'
-                        : '确认后条目会加进当前预设，不会自动保存，检查好了再手动保存预设。',
+                        ? '确认后，所选条目将合并到正在导入的预设中，并随导入一同保存。旧版本预设不受影响。'
+                        : '确认后，所选条目将添加到当前预设。预设不会自动保存，请检查后手动保存。',
                 }),
             ]),
             sectionsHost,
@@ -870,7 +898,7 @@
         renderLists();
 
         const result = await callGenericPopup(root, POPUP_TYPE.CONFIRM, '', {
-            okButton: '导入勾选的条目',
+            okButton: '导入所选条目',
             cancelButton: mode === 'import' ? '跳过，直接导入' : '取消',
             wide: true,
             allowVerticalScrolling: true,
@@ -903,13 +931,14 @@
 
     function describeMigration({ insertedIds, replaced }) {
         return [
-            insertedIds.length ? `放进了 ${insertedIds.length} 个旧版条目` : '',
-            replaced ? `用旧版内容覆盖了 ${replaced} 个条目` : '',
+            insertedIds.length ? `导入 ${insertedIds.length} 个条目` : '',
+            replaced ? `覆盖 ${replaced} 个条目的设置` : '',
         ].filter(Boolean).join('，');
     }
 
     let compareBusy = false;
 
+    // 在 SillyTavern 保存导入的预设之前执行，修改 event.data 即修改将要保存的内容
     async function onPresetImportReady(event) {
         if (!getSettings().importCompareEnabled || compareBusy) {
             return;
@@ -942,7 +971,7 @@
             const firstDiff = buildDiff(getOldPreset(candidates[0].name).preset, null, target);
 
             if (!firstDiff.added.length && !firstDiff.changed.length) {
-                notify?.info(`「${newName}」和旧版「${candidates[0].name}」没有不同的条目。`);
+                notify?.info(`「${newName}」与旧版本「${candidates[0].name}」的条目没有差异。`);
                 return;
             }
 
@@ -955,8 +984,8 @@
             const summary = applyMigration(result.diff, result.selection, target);
             notify?.success(`已从「${result.oldName}」${describeMigration(summary)}。`);
         } catch (error) {
-            console.error('[预设条目工具] 对比旧版预设失败', error);
-            notify?.error('对比旧版预设失败，这次按原样导入。详情见控制台。');
+            console.error('[预设条目工具] 版本对比失败', error);
+            notify?.error('版本对比失败，本次按原样导入。详细信息见浏览器控制台。');
         } finally {
             compareBusy = false;
         }
@@ -975,14 +1004,14 @@
             const currentName = oai.oai_settings?.preset_settings_openai;
 
             if (!pm?.activeCharacter || !currentName || !Array.isArray(oai.oai_settings?.prompts)) {
-                notify?.warning('预设管理器还没准备好，稍后再试。');
+                notify?.warning('预设管理器尚未就绪，请稍后重试。');
                 return;
             }
 
             const candidates = rankCandidates(oai, currentName, oai.oai_settings, currentName);
 
             if (!candidates.length) {
-                notify?.warning('没有别的预设可以对比。');
+                notify?.warning('没有其他预设可供对比。');
                 return;
             }
 
@@ -1014,26 +1043,35 @@
 
             await pm.render?.();
             void pm.saveServiceSettings?.();
-            notify?.success(`已从「${result.oldName}」${describeMigration(summary)}。检查好了记得手动保存预设。`);
+            notify?.success(`已从「${result.oldName}」${describeMigration(summary)}。当前预设尚未保存。`);
         } catch (error) {
-            console.error('[预设条目工具] 对比旧版预设失败', error);
-            notify?.error('对比旧版预设失败，详情见控制台。');
+            console.error('[预设条目工具] 版本对比失败', error);
+            notify?.error('版本对比失败。详细信息见浏览器控制台。');
         } finally {
             compareBusy = false;
         }
     }
 
     // =====================================================================
-    // 3. 角色条目方案
+    // 3. 条目方案
     // =====================================================================
-    // 存在 extension_settings.presetEntryTools.presets[预设名] 里：
-    //   profiles:          { 方案id: { name, owner, ownerName, entries: {条目id: 开关}, groups: {分组id: 开关} } }
-    //   characterBindings: { 角色key: 方案id }
-    //   chatBindings:      { 角色key::聊天存档id: 方案id 或 ''（这个存档明确不切换） }
+    // 数据位置：extension_settings.presetEntryTools.presets[预设名称]
+    //   profiles:          { 方案 id: { name, owner, ownerName, entries: { 条目 id: 开关 }, groups: { 分组 id: 开关 } } }
+    //   characterBindings: { 角色 key: 方案 id }
+    //   chatBindings:      { 角色 key::聊天存档 id: 方案 id，或 '' 表示该存档不使用方案 }
+    //
+    // 套用规则：
+    //   目标开关 = 默认值，再以方案中记录的开关覆盖。
+    //   默认值由设置 defaultSource 决定：
+    //     'saved'    预设上次保存的开关；
+    //     'previous' 保持切换前的开关（即不修改）。
+    //   未使用方案时，目标开关即为默认值。
+    //   当前预设没有任何方案时，不修改开关。
 
     let oaiModule = null;
-    // 现在的开关是不是来自某个方案（{ presetName, profileId }）；切到没有方案的角色时，据此判断要不要恢复预设自己的开关
-    let lastApplied = null;
+    // 每次套用递增。弹窗关闭时若该值已变化，说明期间切换过角色、聊天存档或预设，弹窗结果作废。
+    let applySequence = 0;
+    let newEntryDialogOpen = false;
 
     function getChatScope() {
         const context = getContext();
@@ -1077,7 +1115,7 @@
 
     const getChatBindingKey = scope => (scope.chatId ? `${scope.key}::${scope.chatId}` : null);
 
-    // 先看这个聊天存档自己的绑定，没有再看角色的
+    // 聊天存档的绑定优先于角色的绑定
     function getBinding(store, scope) {
         const chatKey = getChatBindingKey(scope);
         const chatLevel = Boolean(chatKey && Object.hasOwn(store.chatBindings, chatKey));
@@ -1117,7 +1155,7 @@
         return { entries, groups };
     }
 
-    // 只改方案里记过的条目，之后新加的条目保持原样
+    // 仅修改 states 中列出的条目和分组，返回发生变化的数量
     function applyStates(oai, { entries = {}, groups = {} }) {
         const pm = oai.promptManager;
         let changed = 0;
@@ -1152,8 +1190,8 @@
         return changed;
     }
 
-    // 预设自己保存的开关（还没手动保存的改动不算）
-    function getBaselineStates(oai, presetName) {
+    // 预设上次保存的开关，不含未保存的修改
+    function getSavedStates(oai, presetName) {
         const saved = getSavedPresetData(oai, presetName);
 
         if (!saved) {
@@ -1178,6 +1216,28 @@
         return { entries, groups };
     }
 
+    function getTargetStates(oai, presetName, profile) {
+        const defaults = getSettings().defaultSource === 'saved' ? getSavedStates(oai, presetName) : null;
+        return {
+            entries: { ...defaults?.entries, ...profile?.entries },
+            groups: { ...defaults?.groups, ...profile?.groups },
+        };
+    }
+
+    // 当前列表中有、但方案中没有开关记录的条目
+    function getUnrecordedEntries(oai, profile) {
+        const pm = oai.promptManager;
+        const recorded = profile.entries ?? {};
+
+        return pm.getPromptOrderForCharacter(pm.activeCharacter)
+            .filter(entry => entry?.identifier && !Object.hasOwn(recorded, entry.identifier))
+            .map(entry => ({
+                id: entry.identifier,
+                name: pm.getPromptById?.(entry.identifier)?.name || entry.identifier,
+                enabled: entry.enabled !== false,
+            }));
+    }
+
     function getProfileState() {
         const oai = oaiModule;
         const presetName = oai?.oai_settings?.preset_settings_openai;
@@ -1186,7 +1246,8 @@
         return { oai, presetName, scope, ready, store: ready ? getPresetStore(presetName, false) : null };
     }
 
-    function applyProfileForCurrentChat() {
+    async function applyProfileForCurrentChat({ announce = true } = {}) {
+        const sequence = ++applySequence;
         const settings = getSettings();
         const { oai, presetName, scope, ready, store } = getProfileState();
 
@@ -1194,44 +1255,103 @@
             return;
         }
 
-        const { profileId } = store ? getBinding(store, scope) : { profileId: '' };
-
-        if (profileId) {
-            const profile = store.profiles[profileId];
-
-            if (applyStates(oai, profile)) {
-                notify?.info(`已套用条目方案「${profile.name}」。`);
-            }
-
-            lastApplied = { presetName, profileId };
+        // 当前预设没有任何方案时不做处理，以免影响不使用本功能时的手动开关
+        if (!store || !Object.keys(store.profiles).length) {
             return;
         }
 
-        // 上一个角色套过方案，切到没有方案的角色时恢复预设自己的开关，免得把上一个角色的开关带过来
-        if (settings.restoreBaselineEnabled && lastApplied?.presetName === presetName) {
-            const baseline = getBaselineStates(oai, presetName);
+        const { profileId } = getBinding(store, scope);
+        const profile = profileId ? store.profiles[profileId] : null;
+        const changed = applyStates(oai, getTargetStates(oai, presetName, profile));
 
-            if (baseline) {
-                applyStates(oai, baseline);
-            }
+        if (!profile) {
+            return;
         }
 
-        lastApplied = null;
+        if (changed && announce) {
+            notify?.info(`已套用条目方案「${profile.name}」。`);
+        }
+
+        const unrecorded = getUnrecordedEntries(oai, profile);
+
+        if (!unrecorded.length || !settings.confirmNewEntries || newEntryDialogOpen) {
+            return;
+        }
+
+        const decisions = await askUnrecordedEntries(profile, unrecorded);
+
+        if (!decisions || sequence !== applySequence || getPresetStore(presetName, false)?.profiles[profileId] !== profile) {
+            return;
+        }
+
+        profile.entries ??= toParent({});
+        Object.assign(profile.entries, toParent(decisions));
+        profile.updatedAt = Date.now();
+        saveSettings();
+        applyStates(oai, { entries: decisions });
+        notify?.success(`已将 ${unrecorded.length} 个条目的开关写入方案「${profile.name}」。`);
+    }
+
+    // 逐项确认未记录条目的开关。确认时返回 { 条目 id: 开关 }，取消时返回 null。
+    async function askUnrecordedEntries(profile, unrecorded) {
+        const { callGenericPopup, POPUP_TYPE, POPUP_RESULT } = await loadPopup();
+        newEntryDialogOpen = true;
+
+        try {
+            const section = renderSection({
+                title: '未记录的条目',
+                hint: '勾选表示开启。当前勾选状态为默认值。',
+                items: unrecorded,
+                isChecked: item => item.enabled,
+                renderItem: (item, box) => el('div', { className: 'pvm-item' }, [
+                    el('label', {}, [box, el('span', { className: 'pvm-name', text: item.name })]),
+                ]),
+                emptyText: '无。',
+            });
+            const root = el('div', { className: 'pvm-root' }, [
+                el('div', { className: 'pvm-name', text: `条目方案：${profile.name}` }),
+                el('div', {
+                    className: 'pvm-hint',
+                    text: '该方案中没有以下条目的开关记录，通常是方案保存后新增的条目。'
+                        + '选择「写入方案」后，勾选结果将保存到该方案，之后切换时不再询问；'
+                        + '选择「暂不写入」则本次使用默认值，下次切换时再次询问。',
+                }),
+                section.section,
+            ]);
+            const result = await callGenericPopup(root, POPUP_TYPE.CONFIRM, '', {
+                okButton: '写入方案',
+                cancelButton: '暂不写入',
+                allowVerticalScrolling: true,
+                leftAlign: true,
+            });
+
+            if (result !== POPUP_RESULT.AFFIRMATIVE) {
+                return null;
+            }
+
+            const checked = new Set(section.getChecked());
+            return Object.fromEntries(unrecorded.map(item => [item.id, checked.has(item)]));
+        } finally {
+            newEntryDialogOpen = false;
+        }
     }
 
     function buildProfileBar() {
         const title = el('span', { className: 'pet-bar-who' });
-        const select = el('select', { className: 'text_pole pet-bar-select', title: '切换角色时自动套用的条目方案' });
-        const saveButton = el('div', { className: 'menu_button pet-bar-save', title: '把现在的条目开关保存成这个角色的方案' }, [
+        const select = el('select', { className: 'text_pole pet-bar-select', title: '切换到本角色时自动套用的条目方案' });
+        const saveButton = el('div', { className: 'menu_button pet-bar-save', title: '将当前的条目开关保存为本角色的方案' }, [
             el('i', { className: 'fa-solid fa-floppy-disk' }),
             el('span', { text: ' 当前角色保存为…' }),
         ]);
-        const deleteButton = el('div', { className: 'menu_button pet-bar-delete fa-solid fa-trash-can', title: '删除选中的方案' });
+        const deleteButton = el('div', { className: 'menu_button pet-bar-delete fa-solid fa-trash-can', title: '删除所选方案' });
         const chatBox = el('input', { type: 'checkbox' });
         const bar = el('div', { id: BAR_ID }, [
             el('div', { className: 'pet-bar-title' }, [el('i', { className: 'fa-solid fa-masks-theater' }), title]),
             el('div', { className: 'pet-bar-row' }, [select, saveButton, deleteButton]),
-            el('label', { className: 'checkbox_label pet-bar-chat' }, [chatBox, el('span', { text: '只对当前聊天存档生效' })]),
+            el('label', {
+                className: 'checkbox_label pet-bar-chat',
+                title: '勾选：下拉框中的选择仅绑定到当前聊天存档。不勾选：绑定到角色，适用于该角色所有未单独绑定的聊天存档。',
+            }, [chatBox, el('span', { text: '仅绑定到当前聊天存档（不勾选则绑定到角色）' })]),
         ]);
 
         select.addEventListener('change', () => onProfileSelected(select.value, chatBox.checked));
@@ -1254,9 +1374,9 @@
 
         bar.querySelector('.pet-bar-who').textContent = ready
             ? `条目方案 · ${scope.name}`
-            : '条目方案（打开一个角色聊天后可用）';
+            : '条目方案（需要打开角色聊天）';
 
-        select.replaceChildren(el('option', { value: '', text: '不自动切换' }));
+        select.replaceChildren(el('option', { value: '', text: '不使用方案（按默认值）' }));
 
         if (ready && store) {
             const profiles = Object.entries(store.profiles)
@@ -1265,7 +1385,7 @@
             const others = profiles.filter(([, profile]) => profile.owner !== scope.key);
 
             if (own.length) {
-                select.append(el('optgroup', { label: '这个角色的方案' },
+                select.append(el('optgroup', { label: '本角色的方案' },
                     own.map(([id, profile]) => el('option', { value: id, text: profile.name }))));
             }
 
@@ -1281,11 +1401,15 @@
         chatBox.disabled = !ready || !scope.chatId;
         bar.querySelector('.pet-bar-save').classList.toggle('disabled', !ready);
         bar.querySelector('.pet-bar-delete').classList.toggle('disabled', !ready || !binding.profileId);
-        bar.title = presetName ? `方案按预设分开保存，现在是「${presetName}」的方案` : '';
+        bar.title = presetName ? `方案按预设分别保存。当前预设：${presetName}` : '';
+    }
+
+    function bindingTargetText(chatLevel) {
+        return chatLevel ? '打开此聊天存档' : '切换到本角色';
     }
 
     function onProfileSelected(profileId, chatLevel) {
-        const { oai, presetName, scope, ready } = getProfileState();
+        const { presetName, scope, ready } = getProfileState();
 
         if (!ready) {
             return;
@@ -1294,16 +1418,13 @@
         const store = getPresetStore(presetName);
         setBinding(store, scope, profileId, chatLevel);
         saveSettings();
+        updateProfileBar();
 
         if (profileId) {
-            applyStates(oai, store.profiles[profileId]);
-            lastApplied = { presetName, profileId };
-            notify?.success(`已套用「${store.profiles[profileId].name}」，${chatLevel ? '打开这个聊天存档' : '切换到这个角色'}时会自动套用。`);
+            notify?.success(`已套用方案「${store.profiles[profileId].name}」。${bindingTargetText(chatLevel)}时将自动套用。`);
         }
 
-        // 选「不自动切换」时开关还是方案里的样子，lastApplied 留着，切到别的角色时才能恢复预设自己的开关
-
-        updateProfileBar();
+        void applyProfileForCurrentChat({ announce: false });
     }
 
     function onChatLevelToggled(chatLevel, profileId) {
@@ -1316,16 +1437,19 @@
         const store = getPresetStore(presetName);
 
         if (chatLevel) {
-            // 把现在选的方案单独记给这个聊天存档
+            // 将当前选择单独绑定到此聊天存档
             store.chatBindings[getChatBindingKey(scope)] = profileId;
         } else {
-            // 取消后跟随角色的方案
+            // 解除聊天存档的绑定，改为使用角色的绑定
             delete store.chatBindings[getChatBindingKey(scope)];
-            applyProfileForCurrentChat();
         }
 
         saveSettings();
         updateProfileBar();
+
+        if (!chatLevel) {
+            void applyProfileForCurrentChat();
+        }
     }
 
     async function saveCurrentAsProfile(selectedId, chatLevel) {
@@ -1341,9 +1465,9 @@
         const selected = store.profiles[selectedId];
         const defaultName = selected?.owner === scope.key
             ? selected.name
-            : `${scope.name}的方案${own.length ? ` ${own.length + 1}` : ''}`;
+            : `${scope.name} 方案${own.length ? ` ${own.length + 1}` : ''}`;
         const input = await callGenericPopup(
-            `把现在「${presetName}」的条目开关保存给「${scope.name}」，起个名字：`,
+            `将预设「${presetName}」当前的条目开关保存为「${scope.name}」的方案。方案名称：`,
             POPUP_TYPE.INPUT,
             defaultName,
             { okButton: '保存', cancelButton: '取消' },
@@ -1357,7 +1481,7 @@
         const existing = own.find(([, profile]) => profile.name === name);
 
         if (existing) {
-            const confirmed = await callGenericPopup(`「${name}」已经存在，要用现在的开关覆盖它吗？`, POPUP_TYPE.CONFIRM, '', {
+            const confirmed = await callGenericPopup(`方案「${name}」已存在。是否用当前的条目开关覆盖？`, POPUP_TYPE.CONFIRM, '', {
                 okButton: '覆盖',
                 cancelButton: '取消',
             });
@@ -1376,10 +1500,9 @@
             updatedAt: Date.now(),
         });
         setBinding(store, scope, profileId, chatLevel);
-        lastApplied = { presetName, profileId };
         saveSettings();
         updateProfileBar();
-        notify?.success(`已保存「${name}」，${chatLevel ? '打开这个聊天存档' : '切换到这个角色'}时会自动套用。`);
+        notify?.success(`已保存方案「${name}」。${bindingTargetText(chatLevel)}时将自动套用。`);
     }
 
     async function deleteProfile(profileId) {
@@ -1393,7 +1516,7 @@
 
         const { callGenericPopup, POPUP_TYPE, POPUP_RESULT } = await loadPopup();
         const confirmed = await callGenericPopup(
-            `删除方案「${profile.name}」？用到它的角色和聊天存档都会变成不自动切换，现在的条目开关不会变。`,
+            `删除方案「${profile.name}」？使用该方案的角色和聊天存档将改为不使用方案。当前的条目开关保持不变。`,
             POPUP_TYPE.CONFIRM,
             '',
             { okButton: '删除', cancelButton: '取消' },
@@ -1415,10 +1538,10 @@
 
         saveSettings();
         updateProfileBar();
-        notify?.success(`已删除「${profile.name}」。`);
+        notify?.success(`已删除方案「${profile.name}」。`);
     }
 
-    // 酒馆每次重画预设面板都会清空它，所以盯着面板，按钮栏没了就补回去
+    // SillyTavern 每次重新渲染预设面板时会清空面板内容，因此监听面板，按钮栏缺失时重新插入
     let observedContainer = null;
     let containerObserver = null;
 
@@ -1444,7 +1567,7 @@
 
         existing?.remove();
 
-        // 放在「提示词」标题上方
+        // 插入到「提示词」标题上方
         const anchor = container.querySelector('.completion_prompt_manager_header')
             ?? container.querySelector('#completion_prompt_manager_list');
 
@@ -1458,11 +1581,12 @@
     }
 
     function onChatOrPresetChanged() {
-        applyProfileForCurrentChat();
         ensureProfileBar();
         updateProfileBar();
+        void applyProfileForCurrentChat();
     }
 
+    // 预设重命名时，方案数据随之迁移到新名称下
     function onPresetRenamed(event) {
         if (event?.apiId !== 'openai' || !event.oldName || !event.newName || event.oldName === event.newName) {
             return;
@@ -1475,14 +1599,10 @@
             delete presets[event.oldName];
             saveSettings();
         }
-
-        if (lastApplied?.presetName === event.oldName) {
-            lastApplied.presetName = event.newName;
-        }
     }
 
     // =====================================================================
-    // 扩展页面里的设置
+    // 「扩展」页面中的设置面板
     // =====================================================================
 
     function ensureSettingsPanel() {
@@ -1497,7 +1617,7 @@
         }
 
         const settings = getSettings();
-        const option = (key, label, hint, onChange) => {
+        const checkboxOption = (key, label, hint, onChange) => {
             const box = el('input', { type: 'checkbox' });
             box.checked = settings[key];
             box.addEventListener('change', () => {
@@ -1511,9 +1631,24 @@
                 hint ? el('div', { className: 'pet-panel-hint', text: hint }) : null,
             ]);
         };
+        const selectOption = (key, label, choices, hint) => {
+            const select = el('select', { className: 'text_pole' },
+                choices.map(([value, text]) => el('option', { value, text })));
+            select.value = settings[key];
+            select.addEventListener('change', () => {
+                getSettings()[key] = select.value;
+                saveSettings();
+            });
+
+            return el('div', { className: 'pet-panel-option pet-panel-select' }, [
+                el('span', { text: label }),
+                select,
+                hint ? el('div', { className: 'pet-panel-hint', text: hint }) : null,
+            ]);
+        };
         const compareButton = el('div', { className: 'menu_button' }, [
             el('i', { className: 'fa-solid fa-code-compare' }),
-            el('span', { text: ' 对比旧版预设…' }),
+            el('span', { text: ' 对比旧版本预设…' }),
         ]);
         compareButton.addEventListener('click', () => void compareWithOldPreset());
 
@@ -1524,17 +1659,22 @@
                     el('div', { className: 'inline-drawer-icon fa-solid fa-circle-chevron-down down' }),
                 ]),
                 el('div', { className: 'inline-drawer-content' }, [
-                    option('doubleTapEnabled', '双击条目前的 ☰ 新建条目', '在这个条目下面新建一个空条目；在分组里双击会进同一个分组。'),
-                    option('importCompareEnabled', '导入预设时对比旧版本',
-                        '导入名字只差版本号的新预设时，列出旧版独有（比如自己缝的）或内容不同的条目，勾选后放回原位置。'),
-                    option('profilesEnabled', '角色条目方案',
-                        '在「提示词」上方显示「当前角色保存为…」，把条目开关按角色或聊天存档保存，切换时自动套用。每个预设分开保存。',
+                    checkboxOption('doubleTapEnabled', '双击新建条目',
+                        '双击条目左侧的「☰」，在该条目下方新建空条目。在 BaiBai 分组内双击时，新条目加入同一分组。'),
+                    checkboxOption('importCompareEnabled', '导入时对比旧版本',
+                        '导入预设时，若存在名称仅版本号不同的旧版本，列出仅存在于旧版本的条目和设置不同的条目，所选条目插入原位置。'),
+                    checkboxOption('profilesEnabled', '条目方案',
+                        '在「提示词」标题上方显示方案栏。条目开关可保存为方案并绑定到角色或聊天存档，切换时自动套用。方案按预设分别保存。',
                         () => {
                             ensureProfileBar();
-                            applyProfileForCurrentChat();
+                            void applyProfileForCurrentChat();
                         }),
-                    option('restoreBaselineEnabled', '切到没有方案的角色时，恢复预设自己保存的开关',
-                        '关掉的话，会沿用上一个角色的开关。'),
+                    selectOption('defaultSource', '默认值（未记录的条目开关）', [
+                        ['saved', '预设上次保存的状态'],
+                        ['previous', '沿用上一个角色的状态'],
+                    ], '适用于：未使用方案的角色；方案中没有记录的条目（例如方案保存后新增的条目）。在下次切换角色、聊天存档或预设时生效。'),
+                    checkboxOption('confirmNewEntries', '切换时确认未记录的条目',
+                        '所用方案中存在未记录的条目时，弹出窗口逐项确认开关。确认结果写入该方案。'),
                     compareButton,
                 ]),
             ]),
@@ -1542,7 +1682,7 @@
     }
 
     // =====================================================================
-    // 安装 / 卸载
+    // 安装与卸载
     // =====================================================================
 
     const listenerOptions = { capture: true, passive: true };
@@ -1568,7 +1708,7 @@
     }
 
     ensureSettingsPanel();
-    // 预设面板可能比脚本晚出现，或者被别的插件整个换掉，隔一会儿检查一次
+    // 预设面板可能晚于脚本加载，或被其他扩展替换，因此定时检查方案栏是否存在
     const barTimer = pwin.setInterval(() => {
         if (getSettings().profilesEnabled && !pdoc.getElementById(BAR_ID)) {
             ensureProfileBar();
@@ -1580,7 +1720,7 @@
             oaiModule = oai;
             onChatOrPresetChanged();
         })
-        .catch(error => console.error('[预设条目工具] 加载酒馆模块失败', error));
+        .catch(error => console.error('[预设条目工具] 加载 SillyTavern 模块失败', error));
 
     function uninstall() {
         pwin.removeEventListener('pointerdown', onPointerDown, listenerOptions);
