@@ -168,13 +168,16 @@
 
             const promptIndex = pm.serviceSettings.prompts.findIndex(item => item?.identifier === sourceId);
 
+            // 放进酒馆数据里的对象都在主页面里创建，免得跨 iframe 的对象出怪问题
+            const parentPrompt = pwin.structuredClone(prompt);
+
             if (promptIndex >= 0) {
-                pm.serviceSettings.prompts.splice(promptIndex + 1, 0, prompt);
+                pm.serviceSettings.prompts.splice(promptIndex + 1, 0, parentPrompt);
             } else {
-                pm.serviceSettings.prompts.push(prompt);
+                pm.serviceSettings.prompts.push(parentPrompt);
             }
 
-            order.splice(orderIndex + 1, 0, { identifier: id, enabled: true });
+            order.splice(orderIndex + 1, 0, pwin.structuredClone({ identifier: id, enabled: true }));
 
             const groupName = assignBaiBaiGroup(oaiSettings, sourceId, id, groupIdFromRow);
 
@@ -189,7 +192,8 @@
             // BaiBai 的分组会在重新渲染时把分组数据同步进预设的 extensions，所以先渲染再保存
             await pm.render?.();
             await waitFrames(2);
-            await pm.saveServiceSettings?.();
+            // 这个 Promise 要等酒馆存完设置才会结束，存失败就一直不结束，所以不等它
+            void pm.saveServiceSettings?.();
 
             if (CONFIG.autoSavePreset) {
                 pdoc.getElementById('update_oai_preset')?.click();
@@ -201,7 +205,7 @@
             newRow?.scrollIntoView?.({ block: 'nearest' });
 
             if (CONFIG.openEditor) {
-                openEditor(pm, prompt, newRow);
+                openEditor(pm, parentPrompt, newRow);
             }
         } catch (error) {
             console.error('[双击新建条目]', error);
@@ -236,7 +240,7 @@
             return null;
         }
 
-        groupState.prompts[newId] = { groupId };
+        groupState.prompts[newId] = pwin.structuredClone({ groupId });
         return String(group.name || '未命名分组');
     }
 
