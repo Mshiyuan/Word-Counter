@@ -26,6 +26,8 @@
         previewChars: 2000,
     };
 
+    // 显示在「扩展」页面设置面板的标题中，用于确认正在运行的版本
+    const SCRIPT_VERSION = '1.7.0';
     const SETTINGS_KEY = 'presetEntryTools';
     const DEFAULT_SETTINGS = {
         doubleTapEnabled: true,
@@ -381,6 +383,23 @@
         return worldRow ? { kind: 'world', id: `world:${worldRow.getAttribute('uid')}`, row: worldRow } : null;
     }
 
+    // 手机浏览器的触摸目标校正可能把事件目标改为「☰」旁边的按钮，此时按触点坐标重新查找元素
+    function getTapTargetFromEvent(event) {
+        const direct = getTapTarget(event.target);
+
+        if (direct) {
+            return direct;
+        }
+
+        const point = event.touches?.[0] ?? event;
+
+        if (typeof point?.clientX !== 'number' || typeof point?.clientY !== 'number') {
+            return null;
+        }
+
+        return getTapTarget(pdoc.elementFromPoint(point.clientX, point.clientY));
+    }
+
     function isTapTargetEnabled(target) {
         const settings = getSettings();
         return target.kind === 'world' ? settings.worldInfoDoubleTapEnabled : settings.doubleTapEnabled;
@@ -406,7 +425,7 @@
             return;
         }
 
-        const target = getTapTarget(event.target);
+        const target = getTapTargetFromEvent(event);
         pointerDown = target
             ? { target, x: event.clientX, y: event.clientY, pointerId: event.pointerId }
             : null;
@@ -422,7 +441,7 @@
 
     // 拖动库在部分浏览器上监听 touchstart 或 mousedown 而非 pointerdown，同样拦截
     function onLegacyPointerStart(event) {
-        if (Date.now() < suppressGestureUntil && getTapTarget(event.target)) {
+        if (Date.now() < suppressGestureUntil && getTapTargetFromEvent(event)) {
             event.stopImmediatePropagation();
         }
     }
@@ -461,7 +480,7 @@
 
     // 备用触发方式：pointer 事件被其他脚本拦截时，使用浏览器的 dblclick 事件
     function onDoubleClick(event) {
-        const target = getTapTarget(event.target);
+        const target = getTapTargetFromEvent(event);
 
         if (target) {
             triggerInsert(target);
@@ -1928,7 +1947,7 @@
         host.append(el('div', { id: PANEL_ID }, [
             el('div', { className: 'inline-drawer' }, [
                 el('div', { className: 'inline-drawer-toggle inline-drawer-header' }, [
-                    el('b', { text: '预设条目工具' }),
+                    el('b', { text: `预设条目工具 v${SCRIPT_VERSION}` }),
                     el('div', { className: 'inline-drawer-icon fa-solid fa-circle-chevron-down down' }),
                 ]),
                 el('div', { className: 'inline-drawer-content' }, [
