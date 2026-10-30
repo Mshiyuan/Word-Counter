@@ -1,6 +1,6 @@
 // 酒馆助手脚本「预设条目工具」
 // 功能：
-//   1. 双击新建：双击条目左侧的「☰」拖动手柄，在该条目下方新建空条目。
+//   1. 双击新建：双击预设条目或世界书条目左侧的「☰」拖动手柄，在该条目下方新建空条目。
 //   2. 版本对比：导入预设时，若检测到同一预设的旧版本，列出仅存在于旧版本的条目和内容不同的条目，
 //      所选条目插入新预设中与旧版本相同的位置。
 //   3. 条目方案：将条目开关保存为方案，绑定到角色或聊天存档，切换时自动套用。
@@ -10,9 +10,9 @@
     const CONFIG = {
         // 双击新建：新条目的名称。名称重复时自动追加编号。
         newPromptName: '新条目',
-        // 双击新建：新建后是否打开编辑窗口。
+        // 双击新建：新建后是否打开编辑窗口（预设条目）或展开条目（世界书条目）。
         openEditor: true,
-        // 双击新建：新建后是否自动保存当前预设。
+        // 双击新建：新建预设条目后是否自动保存当前预设。世界书条目新建后总是立即保存。
         autoSavePreset: false,
         // 双击新建：两次点击的最大间隔（毫秒）。
         doubleTapMs: 350,
@@ -29,6 +29,7 @@
     const SETTINGS_KEY = 'presetEntryTools';
     const DEFAULT_SETTINGS = {
         doubleTapEnabled: true,
+        worldInfoDoubleTapEnabled: true,
         importCompareEnabled: true,
         profilesEnabled: true,
         // 切换角色、聊天存档或预设时自动套用方案；关闭时需在方案栏点击「套用」
@@ -48,6 +49,7 @@
     const BAR_ID = 'preset-entry-tools-profile-bar';
     const PANEL_ID = 'preset-entry-tools-settings';
     const ROW_SELECTOR = '#completion_prompt_manager_list li.completion_prompt_manager_prompt[data-pm-identifier]';
+    const WORLD_ROW_SELECTOR = '#world_popup_entries_list .world_entry[uid]';
     const GLOBAL_ORDER_ID = '100001';
     // SillyTavern 内置条目。所有预设都包含这些条目，不参与同一预设的判定。
     const BUILTIN_IDS = new Set([
@@ -102,6 +104,7 @@
 
     const loadOpenAi = () => importFromTavern('scripts/openai.js');
     const loadPopup = () => importFromTavern('scripts/popup.js');
+    const loadWorldInfoModule = () => importFromTavern('scripts/world-info.js');
     const getContext = () => pwin.SillyTavern.getContext();
 
     // 写入 SillyTavern 数据的对象在主页面中创建，避免跨 iframe 的对象引用
@@ -356,18 +359,31 @@
     // 1. 双击新建
     // =====================================================================
 
-    function getTargetRow(target) {
-        const handle = target?.closest?.('.drag-handle');
-        const row = handle?.closest(ROW_SELECTOR);
+    // 返回双击目标：{ kind: 'prompt' | 'world', id, row }。不是可双击的手柄时返回 null。
+    function getTapTarget(element) {
+        const handle = element?.closest?.('.drag-handle');
 
-        // 排除 BaiBai 收藏区的镜像条目和全局库条目
-        if (!row
-            || row.dataset.presetFavoriteMirror === 'true'
-            || row.classList.contains('bai-bai-preset-global-library-prompt')) {
+        if (!handle) {
             return null;
         }
 
-        return row;
+        const promptRow = handle.closest(ROW_SELECTOR);
+
+        // 排除 BaiBai 收藏区的镜像条目和全局库条目
+        if (promptRow) {
+            return promptRow.dataset.presetFavoriteMirror === 'true'
+                || promptRow.classList.contains('bai-bai-preset-global-library-prompt')
+                ? null
+                : { kind: 'prompt', id: `prompt:${promptRow.dataset.pmIdentifier}`, row: promptRow };
+        }
+
+        const worldRow = handle.closest(WORLD_ROW_SELECTOR);
+        return worldRow ? { kind: 'world', id: `world:${worldRow.getAttribute('uid')}`, row: worldRow } : null;
+    }
+
+    function isTapTargetEnabled(target) {
+        const settings = getSettings();
+        return target.kind === 'world' ? settings.worldInfoDoubleTapEnabled : settings.doubleTapEnabled;
     }
 
     let pointerDown = null;
@@ -377,9 +393,9 @@
     // 第二次点击的按下事件不传给拖动库的截止时间。见 onPointerDown。
     let suppressGestureUntil = 0;
 
-    function isSecondTap(row, event) {
+    function isSecondTap(target, event) {
         return Boolean(lastTap
-            && lastTap.id === row.dataset.pmIdentifier
+            && lastTap.id === target.id
             && Date.now() - lastTap.time <= CONFIG.doubleTapMs
             && Math.hypot(event.clientX - lastTap.x, event.clientY - lastTap.y) <= CONFIG.moveTolerance * 2);
     }
@@ -390,14 +406,15 @@
             return;
         }
 
-        const row = getTargetRow(event.target);
-        pointerDown = row
-            ? { row, id: row.dataset.pmIdentifier, x: event.clientX, y: event.clientY, pointerId: event.pointerId }
+        const target = getTapTarget(event.target);
+        pointerDown = target
+            ? { target, x: event.clientX, y: event.clientY, pointerId: event.pointerId }
             : null;
 
-        // 第二次点击不传给拖动库。否则拖动库会将其视为一次拖放，
-        // BaiBai 随即按其列表模型重写条目顺序；若此时新条目已插入而模型尚未更新，新条目会被移出顺序。
-        if (row && getSettings().doubleTapEnabled && isSecondTap(row, event)) {
+        // 第二次点击不传给拖动库。否则拖动库会将其视为一次拖放：
+        // 预设列表中，BaiBai 随即按其列表模型重写条目顺序，若此时新条目已插入而模型尚未更新，新条目会被移出顺序；
+        // 世界书列表中，拖放结束会重新保存当前页的顺序。
+        if (target && isTapTargetEnabled(target) && isSecondTap(target, event)) {
             suppressGestureUntil = Date.now() + 800;
             event.stopImmediatePropagation();
         }
@@ -405,7 +422,7 @@
 
     // 拖动库在部分浏览器上监听 touchstart 或 mousedown 而非 pointerdown，同样拦截
     function onLegacyPointerStart(event) {
-        if (Date.now() < suppressGestureUntil && getTargetRow(event.target)) {
+        if (Date.now() < suppressGestureUntil && getTapTarget(event.target)) {
             event.stopImmediatePropagation();
         }
     }
@@ -426,15 +443,15 @@
         const now = Date.now();
 
         if (lastTap
-            && lastTap.id === down.id
+            && lastTap.id === down.target.id
             && now - lastTap.time <= CONFIG.doubleTapMs
             && Math.hypot(down.x - lastTap.x, down.y - lastTap.y) <= CONFIG.moveTolerance * 2) {
             lastTap = null;
-            triggerInsert(down.row);
+            triggerInsert(down.target);
             return;
         }
 
-        lastTap = { id: down.id, time: now, x: down.x, y: down.y };
+        lastTap = { id: down.target.id, time: now, x: down.x, y: down.y };
     }
 
     function onPointerCancel() {
@@ -444,23 +461,28 @@
 
     // 备用触发方式：pointer 事件被其他脚本拦截时，使用浏览器的 dblclick 事件
     function onDoubleClick(event) {
-        const row = getTargetRow(event.target);
+        const target = getTapTarget(event.target);
 
-        if (row) {
-            triggerInsert(row);
+        if (target) {
+            triggerInsert(target);
         }
     }
 
-    function triggerInsert(row) {
+    function triggerInsert(target) {
         const now = Date.now();
 
-        if (!getSettings().doubleTapEnabled || now - lastTriggerAt < 600) {
+        if (!isTapTargetEnabled(target) || now - lastTriggerAt < 600) {
             return;
         }
 
         lastTriggerAt = now;
         pwin.getSelection?.()?.removeAllRanges?.();
-        void insertPromptAfter(row.dataset.pmIdentifier, row.dataset.presetGroupId || '');
+
+        if (target.kind === 'world') {
+            void insertWorldEntryAfter(target.row.getAttribute('uid'));
+        } else {
+            void insertPromptAfter(target.row.dataset.pmIdentifier, target.row.dataset.presetGroupId || '');
+        }
     }
 
     async function insertPromptAfter(sourceId, groupIdFromRow) {
@@ -648,18 +670,146 @@
         return `${base} ${Date.now()}`;
     }
 
-    async function waitForRow(id, timeoutMs = 1500) {
-        const selector = `${ROW_SELECTOR}[data-pm-identifier="${pwin.CSS?.escape ? pwin.CSS.escape(id) : id}"]`;
+    function waitForRow(id, timeoutMs = 1500) {
+        return waitForSelector(`${ROW_SELECTOR}[data-pm-identifier="${pwin.CSS?.escape ? pwin.CSS.escape(id) : id}"]`, timeoutMs);
+    }
+
+    async function waitForSelector(selector, timeoutMs = 1500) {
         const deadline = Date.now() + timeoutMs;
 
         while (Date.now() < deadline) {
-            const row = pdoc.querySelector(selector);
+            const element = pdoc.querySelector(selector);
+
+            if (element) {
+                return element;
+            }
+
+            await waitFrames(1);
+        }
+
+        return null;
+    }
+
+    // ---------- 世界书条目 ----------
+
+    let worldInsertBusy = false;
+
+    // 与 SillyTavern 世界书「自定义」排序一致：displayIndex 升序，其次 order 降序，再次 uid 升序
+    function compareWorldEntries(a, b) {
+        return ((a.displayIndex ?? a.uid) - (b.displayIndex ?? b.uid))
+            || ((b.order ?? 0) - (a.order ?? 0))
+            || (a.uid - b.uid);
+    }
+
+    // 世界书编辑器持有自己的一份数据副本。直接修改编辑器以外的副本会被编辑器之后的保存覆盖，因此流程为：
+    // 从缓存取最新数据（编辑器的修改会同步写入缓存）→ 插入条目并重新编号 → 立即保存（同时取消编辑器排队中的保存）
+    // → 让编辑器从缓存重新载入。
+    async function insertWorldEntryAfter(sourceUid) {
+        if (worldInsertBusy) {
+            return;
+        }
+
+        worldInsertBusy = true;
+
+        try {
+            const wi = await loadWorldInfoModule();
+            const name = wi.world_names?.[Number(pdoc.getElementById('world_editor_select')?.value)];
+
+            if (!name) {
+                notify?.warning('未找到当前打开的世界书。');
+                return;
+            }
+
+            const data = await wi.loadWorldInfo(name);
+            const source = data?.entries?.[sourceUid];
+
+            if (!source) {
+                notify?.warning('该条目不在当前世界书中。');
+                return;
+            }
+
+            const pagination = pwin.jQuery?.('#world_info_pagination');
+            let page = 1;
+
+            try {
+                page = Number(pagination?.pagination('getCurrentPageNum')) || 1;
+            } catch {
+                page = 1;
+            }
+
+            // 源条目是当前页最后一条时，新条目位于下一页第一条
+            const pageRows = [...pdoc.querySelectorAll(WORLD_ROW_SELECTOR)];
+            const sourceIsLastOnPage = pageRows.at(-1)?.getAttribute('uid') === String(sourceUid);
+            const targetPage = sourceIsLastOnPage ? page + 1 : page;
+
+            const ordered = Object.values(data.entries)
+                .filter(item => item && typeof item === 'object' && !Array.isArray(item))
+                .sort(compareWorldEntries);
+            const entry = wi.createWorldInfoEntry(name, data);
+
+            if (!entry) {
+                notify?.error('新建条目失败：无法分配条目编号。');
+                return;
+            }
+
+            // 新条目放在源条目之后，全部条目按当前顺序重新编号
+            ordered.splice(ordered.indexOf(source) + 1, 0, entry);
+            ordered.forEach((item, index) => {
+                if (item.displayIndex !== index) {
+                    item.displayIndex = index;
+                    wi.setWIOriginalDataValue(data, item.uid, 'extensions.display_index', index);
+                }
+            });
+
+            await wi.saveWorldInfo(name, data, true);
+            await wi.showWorldEditor(name);
+
+            const row = await showWorldEntryRow(entry.uid, targetPage, sourceIsLastOnPage ? page : page + 1);
+
+            if (!row) {
+                return;
+            }
+
+            if (CONFIG.openEditor) {
+                const content = row.querySelector('.inline-drawer-content');
+                const collapsed = !content || pwin.getComputedStyle(content).display === 'none';
+
+                if (collapsed) {
+                    row.querySelector('.inline-drawer-header .inline-drawer-toggle')?.click();
+                }
+            }
+
+            row.scrollIntoView?.({ block: 'center' });
+        } catch (error) {
+            console.error('[预设条目工具] 新建世界书条目失败', error);
+            notify?.error('新建世界书条目失败。详细信息见浏览器控制台。');
+        } finally {
+            worldInsertBusy = false;
+        }
+    }
+
+    // 编辑器重新载入后位于第 1 页。先翻到预计的页，未找到时再尝试备选页。
+    async function showWorldEntryRow(uid, page, fallbackPage) {
+        const selector = `${WORLD_ROW_SELECTOR.replace('[uid]', '')}[uid="${uid}"]`;
+        const pagination = pwin.jQuery?.('#world_info_pagination');
+
+        // 等待第 1 页渲染完成，避免与翻页的渲染交错
+        await waitForSelector('#world_popup_entries_list .world_entry', 1500);
+
+        for (const [index, target] of [page, fallbackPage].entries()) {
+            if (index > 0 || target !== 1) {
+                try {
+                    pagination?.pagination('go', target);
+                } catch {
+                    return null;
+                }
+            }
+
+            const row = await waitForSelector(selector, 1500);
 
             if (row) {
                 return row;
             }
-
-            await waitFrames(1);
         }
 
         return null;
@@ -1782,8 +1932,10 @@
                     el('div', { className: 'inline-drawer-icon fa-solid fa-circle-chevron-down down' }),
                 ]),
                 el('div', { className: 'inline-drawer-content' }, [
-                    checkboxOption('doubleTapEnabled', '双击新建条目',
-                        '双击条目左侧的「☰」，在该条目下方新建空条目。在 BaiBai 分组内双击时，新条目加入同一分组。'),
+                    checkboxOption('doubleTapEnabled', '预设：双击新建条目',
+                        '双击预设条目左侧的「☰」，在该条目下方新建空条目。在 BaiBai 分组内双击时，新条目加入同一分组。'),
+                    checkboxOption('worldInfoDoubleTapEnabled', '世界书：双击新建条目',
+                        '双击世界书条目左侧的「☰」，在该条目下方新建空条目并立即保存世界书。仅在排序方式为「自定义」时可用（其他排序方式下不显示「☰」）。'),
                     checkboxOption('importCompareEnabled', '导入时对比旧版本',
                         '导入预设时，若存在名称仅版本号不同的旧版本，列出仅存在于旧版本的条目和设置不同的条目，所选条目插入原位置。'),
                     checkboxOption('profilesEnabled', '条目方案',
