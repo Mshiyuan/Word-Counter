@@ -27,7 +27,7 @@
     };
 
     // 显示在「扩展」页面设置面板的标题中，用于确认正在运行的版本
-    const SCRIPT_VERSION = '1.7.0';
+    const SCRIPT_VERSION = '1.7.1';
     const SETTINGS_KEY = 'presetEntryTools';
     const DEFAULT_SETTINGS = {
         doubleTapEnabled: true,
@@ -39,6 +39,8 @@
         // 未记录开关的取值来源：'saved' 为预设上次保存的状态，'previous' 为保持切换前的状态
         defaultSource: 'saved',
         confirmNewEntries: true,
+        // 排查模式：在屏幕上显示双击的识别过程
+        debugTaps: false,
     };
     const DEFAULT_SOURCES = ['saved', 'previous'];
     const BUTTON_NAME = '对比旧版本预设';
@@ -400,6 +402,34 @@
         return getTapTarget(pdoc.elementFromPoint(point.clientX, point.clientY));
     }
 
+    // ---------- 排查模式 ----------
+
+    function debugTap(message) {
+        if (!getSettings().debugTaps) {
+            return;
+        }
+
+        console.info('[预设条目工具·排查]', message);
+        notify?.info(message, '排查模式', { timeOut: 5000 });
+    }
+
+    function describeElement(element) {
+        if (!element?.tagName) {
+            return '无';
+        }
+
+        const classes = typeof element.className === 'string'
+            ? element.className.trim().split(/\s+/).filter(Boolean).slice(0, 3).join('.')
+            : '';
+        return element.tagName.toLowerCase() + (classes ? `.${classes}` : '');
+    }
+
+    function describeTapTarget(target) {
+        return target.kind === 'world' ? `世界书条目 #${target.row.getAttribute('uid')}` : '预设条目';
+    }
+
+    const isInsideEntryList = element => Boolean(element?.closest?.('#world_popup_entries_list, #completion_prompt_manager_list'));
+
     function isTapTargetEnabled(target) {
         const settings = getSettings();
         return target.kind === 'world' ? settings.worldInfoDoubleTapEnabled : settings.doubleTapEnabled;
@@ -430,6 +460,13 @@
             ? { target, x: event.clientX, y: event.clientY, pointerId: event.pointerId }
             : null;
 
+        if (target) {
+            debugTap(`按下：${describeTapTarget(target)}`);
+        } else if (getSettings().debugTaps && isInsideEntryList(event.target)) {
+            const atPoint = pdoc.elementFromPoint(event.clientX, event.clientY);
+            debugTap(`按下：不是 ☰。事件目标：${describeElement(event.target)}；触点元素：${describeElement(atPoint)}`);
+        }
+
         // 第二次点击不传给拖动库。否则拖动库会将其视为一次拖放：
         // 预设列表中，BaiBai 随即按其列表模型重写条目顺序，若此时新条目已插入而模型尚未更新，新条目会被移出顺序；
         // 世界书列表中，拖放结束会重新保存当前页的顺序。
@@ -454,7 +491,10 @@
             return;
         }
 
-        if (Math.hypot(event.clientX - down.x, event.clientY - down.y) > CONFIG.moveTolerance) {
+        const moved = Math.hypot(event.clientX - down.x, event.clientY - down.y);
+
+        if (moved > CONFIG.moveTolerance) {
+            debugTap(`松开：移动 ${Math.round(moved)} 像素，超过 ${CONFIG.moveTolerance}，视为拖动`);
             lastTap = null;
             return;
         }
@@ -465,15 +505,26 @@
             && lastTap.id === down.target.id
             && now - lastTap.time <= CONFIG.doubleTapMs
             && Math.hypot(down.x - lastTap.x, down.y - lastTap.y) <= CONFIG.moveTolerance * 2) {
+            debugTap(`松开：识别为双击（间隔 ${now - lastTap.time} 毫秒）`);
             lastTap = null;
             triggerInsert(down.target);
             return;
+        }
+
+        if (lastTap?.id === down.target.id) {
+            debugTap(`松开：与上一下间隔 ${now - lastTap.time} 毫秒，超过 ${CONFIG.doubleTapMs}，重新计为第 1 下`);
+        } else {
+            debugTap('松开：记为第 1 下');
         }
 
         lastTap = { id: down.target.id, time: now, x: down.x, y: down.y };
     }
 
     function onPointerCancel() {
+        if (pointerDown) {
+            debugTap('触摸被浏览器取消（pointercancel），本次点击无效');
+        }
+
         pointerDown = null;
         lastTap = null;
     }
@@ -490,7 +541,12 @@
     function triggerInsert(target) {
         const now = Date.now();
 
-        if (!isTapTargetEnabled(target) || now - lastTriggerAt < 600) {
+        if (!isTapTargetEnabled(target)) {
+            debugTap('该功能已在设置中关闭');
+            return;
+        }
+
+        if (now - lastTriggerAt < 600) {
             return;
         }
 
@@ -725,6 +781,7 @@
     // → 让编辑器从缓存重新载入。
     async function insertWorldEntryAfter(sourceUid) {
         if (worldInsertBusy) {
+            debugTap('上一次新建尚未结束，本次忽略');
             return;
         }
 
@@ -738,6 +795,8 @@
                 notify?.warning('未找到当前打开的世界书。');
                 return;
             }
+
+            debugTap(`开始新建：世界书「${name}」，源条目 #${sourceUid}`);
 
             const data = await wi.loadWorldInfo(name);
             const source = data?.entries?.[sourceUid];
@@ -786,8 +845,11 @@
             const row = await showWorldEntryRow(entry.uid, targetPage, sourceIsLastOnPage ? page : page + 1);
 
             if (!row) {
+                debugTap(`已保存新条目 #${entry.uid}，但未在第 ${targetPage} 页或相邻页找到它`);
                 return;
             }
+
+            debugTap(`完成：新条目 #${entry.uid}`);
 
             if (CONFIG.openEditor) {
                 const content = row.querySelector('.inline-drawer-content');
@@ -1975,6 +2037,8 @@
                     ], '适用于：未使用方案的角色；方案中没有记录的条目（例如方案保存后新增的条目）。在下次切换角色、聊天存档或预设时生效。'),
                     checkboxOption('confirmNewEntries', '切换时确认未记录的条目',
                         '所用方案中存在未记录的条目时，弹出窗口逐项确认开关。确认结果写入该方案。'),
+                    checkboxOption('debugTaps', '排查模式',
+                        '双击时在屏幕上显示识别过程（按下的元素、两次点击的间隔、是否识别为双击等），用于排查双击无反应的问题。排查结束后请关闭。'),
                     compareButton,
                 ]),
             ]),
