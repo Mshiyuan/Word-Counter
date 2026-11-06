@@ -427,7 +427,7 @@
       --cg-c1: rgba(127,127,127,.08); --cg-c2: rgba(127,127,127,.14); --cg-c3: rgba(127,127,127,.22);
       --cg-muted: rgba(127,127,127,.95); --cg-line: rgba(127,127,127,.55);
       --cg-shadow: var(--SmartThemeShadowColor, rgba(0,0,0,.15));
-      display:flex;flex-direction:column;gap:12px;padding:10px 2px 6px;color:var(--cg-fg);text-align:left;
+      display:flex;flex-direction:column;gap:8px;padding:6px 0 4px;color:var(--cg-fg);text-align:left;
     }
     @supports (color: color-mix(in srgb, red 50%, blue)) {
       #${ENTRY_ID} .cg{
@@ -439,42 +439,42 @@
       }
     }
     #${ENTRY_ID} .cg *{box-sizing:border-box}
-    #${ENTRY_ID} .cg-card{background:var(--cg-c1);border-radius:18px;padding:14px 16px;border:2px solid transparent;
+    #${ENTRY_ID} .cg-card{background:var(--cg-c1);border-radius:12px;padding:9px 12px;border:1.5px solid transparent;
       transition:background .2s ease, border-color .2s ease, transform .18s cubic-bezier(.34,1.56,.64,1)}
-    #${ENTRY_ID} .cg-hero{display:flex;align-items:center;gap:12px}
+    #${ENTRY_ID} .cg-hero{display:flex;align-items:center;gap:10px}
     #${ENTRY_ID} .cg-grow{flex:1;min-width:0}
-    #${ENTRY_ID} .cg-t{font-weight:700;font-size:1.08em;line-height:1.35}
-    #${ENTRY_ID} .cg-sub{color:var(--cg-muted);font-size:.85em;line-height:1.5;margin-top:2px;overflow:hidden;text-overflow:ellipsis}
+    #${ENTRY_ID} .cg-t{font-weight:600;font-size:.95em;line-height:1.4}
+    #${ENTRY_ID} .cg-sub{color:var(--cg-muted);font-size:.8em;line-height:1.45;margin-top:1px;overflow:hidden;text-overflow:ellipsis}
     #${ENTRY_ID} .cg-nowrap{white-space:nowrap}
-    #${ENTRY_ID} .cg-pill{flex-shrink:0;white-space:nowrap;border-radius:999px;background:var(--cg-c2);padding:5px 14px;font-size:.88em;
+    #${ENTRY_ID} .cg-pill{flex-shrink:0;white-space:nowrap;border-radius:999px;background:var(--cg-c2);padding:2px 10px;font-size:.8em;
       display:inline-flex;align-items:center;gap:6px;user-select:none}
     #${ENTRY_ID} .cg-btn{cursor:pointer;transition:background .2s ease, transform .18s cubic-bezier(.34,1.56,.64,1)}
     #${ENTRY_ID} .cg-btn:hover{background:var(--cg-c3)}
     #${ENTRY_ID} .cg-btn:active{transform:scale(.94)}
-    #${ENTRY_ID} .cg-sec{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:6px 4px 0}
-    #${ENTRY_ID} .cg-sec-t{color:var(--cg-muted);font-size:.9em}
-    #${ENTRY_ID} .cg-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
-    #${ENTRY_ID} .cg-snap{position:relative;cursor:pointer;display:flex;flex-direction:column;min-height:118px;padding:14px}
+    #${ENTRY_ID} .cg-sec{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:4px 2px 0}
+    #${ENTRY_ID} .cg-sec-t{color:var(--cg-muted);font-size:.82em}
+    #${ENTRY_ID} .cg-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
+    #${ENTRY_ID} .cg-snap{position:relative;cursor:pointer;display:flex;flex-direction:column;padding:9px 11px}
     #${ENTRY_ID} .cg-snap:hover{background:var(--cg-c2)}
     #${ENTRY_ID} .cg-snap:active{transform:scale(.97)}
     #${ENTRY_ID} .cg-snap.cg-on{border-color:var(--cg-line);background:var(--cg-c2)}
-    #${ENTRY_ID} .cg-snap .cg-t{font-size:1em;padding-right:18px}
-    #${ENTRY_ID} .cg-check{position:absolute;top:14px;right:14px;font-size:.9em}
-    #${ENTRY_ID} .cg-tags{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-top:auto;padding-top:12px}
-    #${ENTRY_ID} .cg-tag{background:var(--cg-c2);border-radius:999px;padding:2px 10px;font-size:.78em;color:var(--cg-muted);white-space:nowrap}
-    #${ENTRY_ID} .cg-trash{margin-left:auto;color:var(--cg-muted);padding:4px 6px;border-radius:8px;cursor:pointer;transition:color .2s, background .2s}
+    #${ENTRY_ID} .cg-snap .cg-t{padding-right:16px}
+    #${ENTRY_ID} .cg-check{position:absolute;top:10px;right:11px;font-size:.75em}
+    #${ENTRY_ID} .cg-tags{display:flex;align-items:center;gap:4px;flex-wrap:wrap;margin-top:auto;padding-top:6px}
+    #${ENTRY_ID} .cg-tag{background:var(--cg-c2);border-radius:999px;padding:0 7px;font-size:.72em;color:var(--cg-muted);white-space:nowrap}
+    #${ENTRY_ID} .cg-trash{margin-left:auto;font-size:.8em;color:var(--cg-muted);padding:3px 5px;border-radius:8px;cursor:pointer;transition:color .2s, background .2s}
     #${ENTRY_ID} .cg-trash:hover{color:var(--cg-fg);background:var(--cg-c2)}
     #${ENTRY_ID} .cg-add{grid-column:1 / -1;display:flex;align-items:center;justify-content:center;gap:6px;min-height:0;padding:12px;
       background:transparent;border:2px dashed var(--cg-c3);color:var(--cg-muted);cursor:pointer;font-size:.9em}
     #${ENTRY_ID} .cg-add:hover{color:var(--cg-fg);border-color:var(--cg-line)}
-    #${ENTRY_ID} .cg-empty{grid-column:1 / -1;color:var(--cg-muted);font-size:.88em;text-align:center;padding:18px 10px}
-    #${ENTRY_ID} .cg-opt + .cg-opt{margin-top:16px}
-    #${ENTRY_ID} .cg-opt .cg-sub{margin-bottom:8px}
-    #${ENTRY_ID} .cg-seg{display:flex;gap:4px;padding:4px;border-radius:16px;background:var(--cg-c1)}
-    #${ENTRY_ID} .cg-seg-i{flex:1;text-align:center;white-space:nowrap;padding:8px 6px;border-radius:12px;cursor:pointer;color:var(--cg-muted);
+    #${ENTRY_ID} .cg-empty{grid-column:1 / -1;color:var(--cg-muted);font-size:.8em;text-align:center;padding:10px}
+    #${ENTRY_ID} .cg-opt + .cg-opt{margin-top:10px}
+    #${ENTRY_ID} .cg-opt .cg-sub{margin-bottom:5px}
+    #${ENTRY_ID} .cg-seg{display:flex;gap:3px;padding:3px;border-radius:10px;background:var(--cg-c1)}
+    #${ENTRY_ID} .cg-seg-i{flex:1;text-align:center;white-space:nowrap;padding:3px 4px;border-radius:8px;font-size:.85em;cursor:pointer;color:var(--cg-muted);
       transition:background .25s ease, color .25s ease, box-shadow .25s ease, transform .18s cubic-bezier(.34,1.56,.64,1)}
     #${ENTRY_ID} .cg-seg-i:active{transform:scale(.94)}
-    #${ENTRY_ID} .cg-seg-i.cg-on{color:var(--cg-fg);font-weight:700;background:var(--SmartThemeBlurTintColor, var(--cg-c3));box-shadow:0 1px 6px var(--cg-shadow)}
+    #${ENTRY_ID} .cg-seg-i.cg-on{color:var(--cg-fg);font-weight:700;background:var(--SmartThemeBlurTintColor, var(--cg-c3));box-shadow:0 1px 3px var(--cg-shadow)}
   `;
   let renderTimer = null;
   function panelBody() {
@@ -547,12 +547,12 @@
       <div class="cg-sec"><span class="cg-sec-t">设置</span></div>
       <div class="cg-card">
         <div class="cg-opt">
-          <div class="cg-t" style="font-size:1em">挡下坏保存后</div>
+          <div class="cg-t">挡下坏保存后</div>
           <div class="cg-sub">文件本身不会被改动，只是选怎么让聊天回来</div>
           ${seg('autoRestore', [[1, '自动恢复'], [0, '只提示']], settings.autoRestore ? 1 : 0)}
         </div>
         <div class="cg-opt">
-          <div class="cg-t" style="font-size:1em">每个聊天保留历史</div>
+          <div class="cg-t">每个聊天保留历史</div>
           <div class="cg-sub">只在删很多楼、大面积改写、打开聊天时留底</div>
           ${seg('historyLimit', limits.map(v => [v, v + ' 份']), settings.historyLimit)}
         </div>
