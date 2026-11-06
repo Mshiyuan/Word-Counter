@@ -420,7 +420,37 @@
     const hm = d.toTimeString().slice(0, 5);
     return d.toDateString() === new Date().toDateString() ? '今天 ' + hm : `${d.getMonth() + 1}/${d.getDate()} ${hm}`;
   };
-  const BTN = 'flex-shrink:0;white-space:nowrap;width:auto;margin:0;padding:3px 10px';
+  const PANEL_CSS = `
+    #${ENTRY_ID} .cg{display:flex;flex-direction:column;gap:10px;text-align:left;padding:6px 0 4px}
+    #${ENTRY_ID} .cg-card{border-radius:12px;padding:12px;background:rgba(127,127,127,.08);border:1px solid rgba(127,127,127,.16)}
+    #${ENTRY_ID} .cg-status{display:flex;gap:12px;align-items:center}
+    #${ENTRY_ID} .cg-ok{background:rgba(76,175,80,.12);border-color:rgba(76,175,80,.32)}
+    #${ENTRY_ID} .cg-warn{background:rgba(230,160,40,.15);border-color:rgba(230,160,40,.4)}
+    #${ENTRY_ID} .cg-icon{flex-shrink:0;width:40px;height:40px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:18px;color:#fff;background:#4caf50}
+    #${ENTRY_ID} .cg-warn .cg-icon{background:#e6a028}
+    #${ENTRY_ID} .cg-main{flex:1;min-width:0}
+    #${ENTRY_ID} .cg-h{font-weight:bold;font-size:1.05em;line-height:1.35}
+    #${ENTRY_ID} .cg-sub{opacity:.7;font-size:.85em;line-height:1.45;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+    #${ENTRY_ID} .cg-title{display:flex;align-items:center;gap:7px;font-weight:bold;margin-bottom:10px}
+    #${ENTRY_ID} .cg-title i{opacity:.7}
+    #${ENTRY_ID} .cg-item{display:flex;align-items:center;gap:8px;padding:9px 10px;border-radius:9px;background:rgba(127,127,127,.08)}
+    #${ENTRY_ID} .cg-item + .cg-item{margin-top:6px}
+    #${ENTRY_ID} .cg-latest{background:rgba(76,175,80,.13);box-shadow:inset 3px 0 0 #4caf50}
+    #${ENTRY_ID} .cg-badge{display:inline-block;font-size:.72em;font-weight:normal;padding:1px 7px;border-radius:8px;background:#4caf50;color:#fff;margin-left:6px;vertical-align:middle}
+    #${ENTRY_ID} .cg-btn{flex-shrink:0;white-space:nowrap;cursor:pointer;padding:4px 13px;border-radius:999px;font-size:.85em;border:1px solid rgba(127,127,127,.38);user-select:none;line-height:1.5}
+    #${ENTRY_ID} .cg-btn:hover{background:rgba(127,127,127,.15)}
+    #${ENTRY_ID} .cg-primary{background:#4caf50;border-color:#4caf50;color:#fff}
+    #${ENTRY_ID} .cg-primary:hover{background:#43a047}
+    #${ENTRY_ID} .cg-amber{background:#e6a028;border-color:#e6a028;color:#fff}
+    #${ENTRY_ID} .cg-del{padding:4px 9px;color:#d9534f;border-color:rgba(217,83,79,.4)}
+    #${ENTRY_ID} .cg-add{margin-top:10px;text-align:center;padding:8px;border-radius:9px;border:1px dashed rgba(127,127,127,.5);cursor:pointer;font-size:.9em;opacity:.85}
+    #${ENTRY_ID} .cg-add:hover{opacity:1;background:rgba(127,127,127,.08)}
+    #${ENTRY_ID} .cg-row{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:7px 0}
+    #${ENTRY_ID} .cg-row + .cg-row{border-top:1px solid rgba(127,127,127,.16)}
+    #${ENTRY_ID} .cg-row select, #${ENTRY_ID} .cg-row input{width:auto !important;min-width:0;margin:0 !important;flex-shrink:0}
+    #${ENTRY_ID} .cg-row input{width:4.5em !important;text-align:center}
+    #${ENTRY_ID} .cg-empty{opacity:.6;font-size:.85em;padding:2px}
+  `;
   let renderTimer = null;
   function panelBody() {
     return P.document.querySelector('#' + ENTRY_ID + ' .cg-body');
@@ -440,57 +470,65 @@
     const latest = recs.find(r => r.kind === 'L');
     const hist = recs.filter(r => r.kind === 'H' && (!latest || r.sig !== latest.sig)).sort((x, y) => y.ts - x.ts);
 
-    const row = (r, isLatest) => `
-      <div style="display:flex;align-items:center;gap:8px;padding:4px 0">
-        <div style="flex:1;min-width:0">
-          <div>${isLatest ? '<b>最新完好版</b>' : esc(r.reason || '历史')}</div>
-          <small style="opacity:.7">${fmtShort(r.ts)} · ${r.n} 楼 · ${fmtSize(r.size)}</small>
+    const item = (r, isLatest) => `
+      <div class="cg-item ${isLatest ? 'cg-latest' : ''}">
+        <div class="cg-main">
+          <div class="cg-h" style="font-size:.95em">${isLatest ? '最新完好版<span class="cg-badge">推荐</span>' : esc(r.reason || '历史版本')}</div>
+          <div class="cg-sub">${fmtShort(r.ts)} · ${r.n} 楼 · ${fmtSize(r.size)}</div>
         </div>
-        <div class="menu_button" data-act="restore" data-id="${esc(r.id)}" style="${BTN}">恢复</div>
-        ${isLatest ? '' : `<div class="menu_button" data-act="del" data-id="${esc(r.id)}" style="${BTN}">删除</div>`}
+        <div class="cg-btn ${isLatest ? 'cg-primary' : ''}" data-act="restore" data-id="${esc(r.id)}">恢复</div>
+        ${isLatest ? '' : `<div class="cg-btn cg-del" data-act="del" data-id="${esc(r.id)}" title="删除"><i class="fa-solid fa-trash-can"></i></div>`}
       </div>`;
 
     const bad = key && isBadDrop(e, n);
     const blocked = lastBlocked && lastBlocked.key === key;
-    body.innerHTML = `
-      <div style="display:flex;flex-direction:column;gap:4px;text-align:left">
-        ${
-          key
-            ? `<div><b>${esc(currentTitle())}</b></div>
-               <small><span style="color:${bad ? '#e0a030' : '#4caf50'}">●</span>
-                 ${bad ? `聊天不完整：当前 ${n} 楼，记录 ${e} 楼` : `保护中 · ${n} 楼`}</small>`
-            : '<small>当前没有打开聊天</small>'
-        }
-        ${
-          blocked
-            ? `<div style="display:flex;align-items:center;gap:8px;padding:6px;margin-top:4px;border:1px solid #e0a030;border-radius:6px">
-                 <small style="flex:1;min-width:0">${fmtShort(lastBlocked.ts)} 挡下：${lastBlocked.e} 楼 → ${lastBlocked.n} 楼</small>
-                 <div class="menu_button" data-act="allow" style="${BTN}">这次是我有意的，放行</div>
-               </div>`
-            : ''
-        }
-        ${
-          key
-            ? `<h2 style="margin:10px 0 2px">快照</h2>
-               ${latest ? row(latest, true) : '<small style="opacity:.7">还没有快照，正常保存一次后会自动生成。</small>'}
-               ${hist.map(r => row(r, false)).join('')}
-               <div class="menu_button" data-act="snap" style="white-space:nowrap;width:100%;margin:6px 0 0">把当前聊天存一份到历史</div>`
-            : ''
-        }
-        <h2 style="margin:10px 0 2px">设置</h2>
-        <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
-          <small>挡下坏保存后</small>
-          <select class="text_pole" data-set="autoRestore" style="width:auto;margin:0">
+    const status = !key
+      ? `<div class="cg-card cg-status">
+           <div class="cg-icon" style="background:rgba(127,127,127,.5)"><i class="fa-solid fa-shield-halved"></i></div>
+           <div class="cg-main"><div class="cg-h">待命中</div><div class="cg-sub">打开一个聊天后开始保护</div></div>
+         </div>`
+      : `<div class="cg-card cg-status ${bad ? 'cg-warn' : 'cg-ok'}">
+           <div class="cg-icon"><i class="fa-solid ${bad ? 'fa-triangle-exclamation' : 'fa-shield-halved'}"></i></div>
+           <div class="cg-main">
+             <div class="cg-h">${bad ? '聊天不完整' : '保护中'}</div>
+             <div class="cg-sub">${esc(currentTitle())}</div>
+             <div class="cg-sub">${bad ? `当前 ${n} 楼，记录是 ${e} 楼，可以从下面恢复` : `共 ${n} 楼`}</div>
+           </div>
+         </div>`;
+    const alert = blocked
+      ? `<div class="cg-card cg-status cg-warn">
+           <div class="cg-icon"><i class="fa-solid fa-hand"></i></div>
+           <div class="cg-main">
+             <div class="cg-h">挡下了一次坏保存</div>
+             <div class="cg-sub">${fmtShort(lastBlocked.ts)} · ${lastBlocked.e} 楼 → ${lastBlocked.n} 楼 · 文件没被改动</div>
+           </div>
+           <div class="cg-btn cg-amber" data-act="allow" title="如果这次是你有意删的楼，点这里放行">放行</div>
+         </div>`
+      : '';
+    const snaps = key
+      ? `<div class="cg-card">
+           <div class="cg-title"><i class="fa-solid fa-clock-rotate-left"></i>快照</div>
+           ${latest ? item(latest, true) : '<div class="cg-empty">还没有快照，正常保存一次后会自动生成</div>'}
+           ${hist.map(r => item(r, false)).join('')}
+           <div class="cg-add" data-act="snap"><i class="fa-solid fa-plus"></i> 把当前聊天存一份到历史</div>
+         </div>`
+      : '';
+    const prefs = `
+      <div class="cg-card">
+        <div class="cg-title"><i class="fa-solid fa-sliders"></i>设置</div>
+        <div class="cg-row">
+          <span>挡下坏保存后</span>
+          <select class="text_pole" data-set="autoRestore">
             <option value="1" ${settings.autoRestore ? 'selected' : ''}>自动恢复聊天</option>
             <option value="0" ${settings.autoRestore ? '' : 'selected'}>只弹小提示</option>
           </select>
         </div>
-        <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
-          <small>每个聊天保留历史</small>
-          <input type="number" min="0" max="20" class="text_pole" data-set="historyLimit" value="${settings.historyLimit}" style="width:4em;margin:0">
-          <small>份</small>
+        <div class="cg-row">
+          <span>每个聊天保留历史（份）</span>
+          <input type="number" min="0" max="20" class="text_pole" data-set="historyLimit" value="${settings.historyLimit}">
         </div>
       </div>`;
+    body.innerHTML = `<div class="cg">${status}${alert}${snaps}${prefs}</div>`;
   }
 
   async function onPanelClick(ev) {
@@ -601,6 +639,9 @@
         </div>
         <div class="inline-drawer-content cg-body"></div>
       </div>`;
+    const style = doc.createElement('style');
+    style.textContent = PANEL_CSS;
+    box.prepend(style);
     box.querySelector('.cg-body').addEventListener('click', onPanelClick);
     box.querySelector('.cg-body').addEventListener('change', onPanelChange);
     box.querySelector('.inline-drawer-toggle').addEventListener('click', () => setTimeout(requestRender, 50));
