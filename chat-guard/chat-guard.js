@@ -12,7 +12,7 @@
   const LS_SETTINGS = 'chatGuard:settings';
   const DB_NAME = 'chat-guard';
   const STORE = 'snaps';
-  const BUTTON = '聊天快照';
+  const ENTRY_ID = 'chat_guard_settings';
 
   const DEFAULTS = {
     autoRestore: true, // true: 挡下后自动恢复聊天; false: 只提示
@@ -172,6 +172,7 @@
     if (old && old.sig === p.sig) return;
     const blob = await gzip(p.text);
     await put({ id: p.key + '|L', key: p.key, kind: 'L', ts: Date.now(), n: p.n, sig: p.sig, url: p.url, title: p.title, size: blob.size, blob });
+    requestRender();
     if (++writesSincePrune >= 10) {
       writesSincePrune = 0;
       await prune();
@@ -187,6 +188,7 @@
     const hist = (await byKey(key)).filter(r => r.kind === 'H').sort((a, b) => b.ts - a.ts);
     if (hist[0] && hist[0].sig === latest.sig) return; // 内容没变，不重复存
     await put({ ...latest, id: key + '|H|' + Date.now(), kind: 'H', ts: Date.now(), reason });
+    requestRender();
     for (const r of hist.slice(limit - 1)) await del(r.id);
   }
 
@@ -298,6 +300,7 @@
     const now = Date.now();
     const repeat = lastBlocked && lastBlocked.key === b.key && now - lastBlocked.ts < 5000;
     lastBlocked = { ...b, ts: now };
+    requestRender();
     console.warn(`[聊天保护] 已拦下一次异常保存：${b.e} 楼 → ${b.n} 楼`, b.key);
     if (!repeat) {
       notify.warning(
@@ -334,6 +337,7 @@
 
   // ---------- 聊天载入 ----------
   async function onChatChanged() {
+    requestRender();
     const key = currentKey();
     if (!key) return;
     const c = ctx();
@@ -405,89 +409,131 @@
     setExpected(rec.key, msgs.length);
     prevFp.set(rec.key, fingerprints(msgs).list);
     if (rec.key === currentKey()) await ctx().reloadCurrentChat();
+    requestRender();
     notify.success(`已恢复到 ${fmtTime(rec.ts)} 的版本（${rec.n} 楼）`, silent ? '聊天保护：自动恢复' : '聊天保护');
     return true;
   }
 
-  // ---------- 面板 ----------
-  async function openPanel() {
-    await enqueue(flushPending);
-    const c = ctx();
+  // ---------- 面板（直接放在「扩展」里正则下面的下拉框中） ----------
+  const fmtShort = ts => {
+    const d = new Date(ts);
+    const hm = d.toTimeString().slice(0, 5);
+    return d.toDateString() === new Date().toDateString() ? '今天 ' + hm : `${d.getMonth() + 1}/${d.getDate()} ${hm}`;
+  };
+  const BTN = 'flex-shrink:0;white-space:nowrap;width:auto;margin:0;padding:3px 10px';
+  let renderTimer = null;
+  function panelBody() {
+    return P.document.querySelector('#' + ENTRY_ID + ' .cg-body');
+  }
+  function requestRender() {
+    clearTimeout(renderTimer);
+    renderTimer = setTimeout(() => render().catch(e => console.warn('[聊天保护] 面板刷新失败', e)), 300);
+  }
+
+  async function render() {
+    const body = panelBody();
+    if (!body || !body.offsetParent) return; // 没展开就不刷新
     const key = currentKey();
-    const recs = key ? (await byKey(key)).sort((a, b) => (a.kind === b.kind ? b.ts - a.ts : a.kind === 'L' ? -1 : 1)) : [];
-    const $ = P.jQuery;
-    const row = r => `
-      <div class="cg-row" style="display:flex;gap:8px;align-items:center;padding:6px 0;border-bottom:1px solid var(--SmartThemeBorderColor)">
-        <div style="flex:1;text-align:left">
-          <b>${r.kind === 'L' ? '最新完好版' : '历史 · ' + esc(r.reason || '')}</b><br>
-          <small>${fmtTime(r.ts)} · ${r.n} 楼 · ${fmtSize(r.size)}</small>
+    const n = ctx().chat.length;
+    const e = key ? expected[key] : null;
+    const recs = key ? await byKey(key) : [];
+    const latest = recs.find(r => r.kind === 'L');
+    const hist = recs.filter(r => r.kind === 'H' && (!latest || r.sig !== latest.sig)).sort((x, y) => y.ts - x.ts);
+
+    const row = (r, isLatest) => `
+      <div style="display:flex;align-items:center;gap:8px;padding:4px 0">
+        <div style="flex:1;min-width:0">
+          <div>${isLatest ? '<b>最新完好版</b>' : esc(r.reason || '历史')}</div>
+          <small style="opacity:.7">${fmtShort(r.ts)} · ${r.n} 楼 · ${fmtSize(r.size)}</small>
         </div>
-        <div class="menu_button" data-act="restore" data-id="${esc(r.id)}">恢复</div>
-        ${r.kind === 'H' ? `<div class="menu_button" data-act="del" data-id="${esc(r.id)}">删除</div>` : ''}
+        <div class="menu_button" data-act="restore" data-id="${esc(r.id)}" style="${BTN}">恢复</div>
+        ${isLatest ? '' : `<div class="menu_button" data-act="del" data-id="${esc(r.id)}" style="${BTN}">删除</div>`}
       </div>`;
-    const blocked =
-      lastBlocked && lastBlocked.key === key
-        ? `<div style="margin:8px 0;padding:6px;border:1px solid var(--SmartThemeQuoteColor)">
-             最近拦下：${fmtTime(lastBlocked.ts)}，${lastBlocked.e} 楼 → ${lastBlocked.n} 楼
-             <div class="menu_button" data-act="allow" style="display:inline-block">这次是我有意的，放行</div>
-           </div>`
-        : '';
-    const html = $(`
-      <div style="text-align:left">
-        <h3>聊天保护</h3>
-        <div>${key ? esc(currentTitle()) : '当前没有打开聊天'}</div>
-        <small>当前 ${c.chat.length} 楼${key && expected[key] != null ? ` · 记录 ${expected[key]} 楼` : ''}</small>
-        ${blocked}
-        <hr>
-        <label><input type="radio" name="cg-mode" value="1" ${settings.autoRestore ? 'checked' : ''}> 挡下坏保存后自动恢复聊天</label><br>
-        <label><input type="radio" name="cg-mode" value="0" ${settings.autoRestore ? '' : 'checked'}> 只弹小提示</label><br>
-        <label>每个聊天保留历史版本 <input type="number" min="0" max="20" class="text_pole" style="width:60px;display:inline-block" data-set="historyLimit" value="${settings.historyLimit}"> 份</label>
-        <hr>
-        ${recs.length ? recs.map(row).join('') : '<small>这个聊天还没有快照</small>'}
-        ${key ? '<div class="menu_button" data-act="snap" style="margin-top:8px">把当前聊天存一份到历史</div>' : ''}
-      </div>`);
 
-    html.on('change', 'input[name=cg-mode]', ev => {
-      settings.autoRestore = ev.target.value === '1';
-      saveSettings();
-    });
-    html.on('change', '[data-set=historyLimit]', ev => {
-      settings.historyLimit = Math.max(0, Math.min(20, Number(ev.target.value) || 0));
-      saveSettings();
-    });
-    html.on('click', '[data-act]', async ev => {
-      const act = ev.currentTarget.dataset.act;
-      const id = ev.currentTarget.dataset.id;
-      if (act === 'allow') {
-        await allowLastBlocked();
-        $(ev.currentTarget).parent().remove();
-      } else if (act === 'del') {
-        await del(id);
-        $(ev.currentTarget).closest('.cg-row').remove();
-      } else if (act === 'restore') {
-        const rec = await get(id);
-        if (!rec) return;
-        const ok = await c.callGenericPopup(
-          `把这个聊天恢复到 ${fmtTime(rec.ts)} 的版本（${rec.n} 楼）？<br><small>恢复前会先把现在的版本存进历史。</small>`,
-          c.POPUP_TYPE.CONFIRM,
-        );
-        if (ok) await restore(rec);
-      } else if (act === 'snap') {
-        const n = ctx().chat.length;
-        if (isBadDrop(expected[key], n)) return notify.warning('当前聊天看起来不完整，不存。');
-        const body = buildCurrentBody();
-        const fp = fingerprints(ctx().chat);
-        await enqueue(async () => {
-          await flushPending();
-          setPending({ key, url: body.url, text: body.text, n, sig: fp.sig, title: currentTitle() });
-          await flushPending();
-          await rotateToHistory(key, '手动');
-        });
-        notify.success('已存入历史');
-      }
-    });
+    const bad = key && isBadDrop(e, n);
+    const blocked = lastBlocked && lastBlocked.key === key;
+    body.innerHTML = `
+      <div style="display:flex;flex-direction:column;gap:4px;text-align:left">
+        ${
+          key
+            ? `<div><b>${esc(currentTitle())}</b></div>
+               <small><span style="color:${bad ? '#e0a030' : '#4caf50'}">●</span>
+                 ${bad ? `聊天不完整：当前 ${n} 楼，记录 ${e} 楼` : `保护中 · ${n} 楼`}</small>`
+            : '<small>当前没有打开聊天</small>'
+        }
+        ${
+          blocked
+            ? `<div style="display:flex;align-items:center;gap:8px;padding:6px;margin-top:4px;border:1px solid #e0a030;border-radius:6px">
+                 <small style="flex:1;min-width:0">${fmtShort(lastBlocked.ts)} 挡下：${lastBlocked.e} 楼 → ${lastBlocked.n} 楼</small>
+                 <div class="menu_button" data-act="allow" style="${BTN}">这次是我有意的，放行</div>
+               </div>`
+            : ''
+        }
+        ${
+          key
+            ? `<h2 style="margin:10px 0 2px">快照</h2>
+               ${latest ? row(latest, true) : '<small style="opacity:.7">还没有快照，正常保存一次后会自动生成。</small>'}
+               ${hist.map(r => row(r, false)).join('')}
+               <div class="menu_button" data-act="snap" style="white-space:nowrap;width:100%;margin:6px 0 0">把当前聊天存一份到历史</div>`
+            : ''
+        }
+        <h2 style="margin:10px 0 2px">设置</h2>
+        <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
+          <small>挡下坏保存后</small>
+          <select class="text_pole" data-set="autoRestore" style="width:auto;margin:0">
+            <option value="1" ${settings.autoRestore ? 'selected' : ''}>自动恢复聊天</option>
+            <option value="0" ${settings.autoRestore ? '' : 'selected'}>只弹小提示</option>
+          </select>
+        </div>
+        <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
+          <small>每个聊天保留历史</small>
+          <input type="number" min="0" max="20" class="text_pole" data-set="historyLimit" value="${settings.historyLimit}" style="width:4em;margin:0">
+          <small>份</small>
+        </div>
+      </div>`;
+  }
 
-    await c.callGenericPopup(html, c.POPUP_TYPE.TEXT, '', { wide: true, allowVerticalScrolling: true, okButton: '关闭' });
+  async function onPanelClick(ev) {
+    const btn = ev.target.closest('[data-act]');
+    if (!btn) return;
+    const act = btn.dataset.act;
+    const id = btn.dataset.id;
+    const key = currentKey();
+    if (act === 'allow') {
+      await allowLastBlocked();
+    } else if (act === 'del') {
+      await del(id);
+    } else if (act === 'restore') {
+      const rec = await get(id);
+      if (!rec) return;
+      const c = ctx();
+      const ok = await c.callGenericPopup(
+        `恢复到 ${fmtShort(rec.ts)} 的版本（${rec.n} 楼）？<br><small>恢复前会先把现在的版本存进历史。</small>`,
+        c.POPUP_TYPE.CONFIRM,
+      );
+      if (ok) await restore(rec);
+    } else if (act === 'snap' && key) {
+      const n = ctx().chat.length;
+      if (isBadDrop(expected[key], n)) return notify.warning('当前聊天看起来不完整，没有存。');
+      const body = buildCurrentBody();
+      const fp = fingerprints(ctx().chat);
+      await enqueue(async () => {
+        await flushPending();
+        setPending({ key, url: body.url, text: body.text, n, sig: fp.sig, title: currentTitle() });
+        await flushPending();
+        await rotateToHistory(key, '手动保存');
+      });
+      notify.success('已存入历史');
+    }
+    requestRender();
+  }
+
+  function onPanelChange(ev) {
+    const t = ev.target;
+    if (t.dataset.set === 'autoRestore') settings.autoRestore = t.value === '1';
+    else if (t.dataset.set === 'historyLimit') settings.historyLimit = Math.max(0, Math.min(20, Number(t.value) || 0));
+    else return;
+    saveSettings();
   }
 
   // ---------- 安装 / 卸载 ----------
@@ -540,7 +586,6 @@
   } catch {
     /* ignore */
   }
-  const ENTRY_ID = 'chat_guard_settings';
   function mountEntry() {
     const doc = P.document;
     if (doc.getElementById(ENTRY_ID)) return true;
@@ -554,13 +599,11 @@
           <b>聊天保护</b>
           <div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div>
         </div>
-        <div class="inline-drawer-content">
-          <div class="menu_button menu_button_icon" style="width:fit-content">
-            <i class="fa-solid fa-shield-halved"></i><span>${BUTTON}</span>
-          </div>
-        </div>
+        <div class="inline-drawer-content cg-body"></div>
       </div>`;
-    box.querySelector('.menu_button').addEventListener('click', () => openPanel());
+    box.querySelector('.cg-body').addEventListener('click', onPanelClick);
+    box.querySelector('.cg-body').addEventListener('change', onPanelChange);
+    box.querySelector('.inline-drawer-toggle').addEventListener('click', () => setTimeout(requestRender, 50));
     regex.after(box);
     return true;
   }
