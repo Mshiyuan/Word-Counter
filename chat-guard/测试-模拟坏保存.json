@@ -1,0 +1,17 @@
+{
+  "type": "script",
+  "enabled": false,
+  "name": "测试-模拟坏保存",
+  "id": "c7a1e0b2-5f3d-4c8e-9a61-chatguardtest",
+  "content": "// 测试用：模拟\"改正则后聊天只剩开场白\"的坏保存。只在测试聊天（分支）里用！\n(async () => {\n  const c = window.parent.SillyTavern.getContext();\n  if (c.chat.length < 5) {\n    toastr.error('请在至少 5 楼的测试聊天里运行');\n    return;\n  }\n  const before = c.chat.length;\n  const greeting = c.chat[0];\n  c.chat.splice(0, c.chat.length, greeting); // 内存里只剩开场白\n  await c.saveChat(); // 尝试把它存进文件\n  toastr.info(`已模拟一次坏保存：${before} 楼 → 1 楼`);\n})();\n",
+  "info": "只在测试聊天里用！打开开关会运行一次：把内存中的聊天清得只剩开场白并尝试保存，用来检验「聊天保护」是否拦截。用完关掉或删除。",
+  "button": {
+    "enabled": false,
+    "buttons": []
+  },
+  "data": {},
+  "export_with": {
+    "data": true,
+    "button": true
+  }
+}
