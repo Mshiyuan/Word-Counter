@@ -301,7 +301,7 @@
     console.warn(`[聊天保护] 已拦下一次异常保存：${b.e} 楼 → ${b.n} 楼`, b.key);
     if (!repeat) {
       notify.warning(
-        settings.autoRestore ? '文件没有被改动，正在恢复聊天…' : '文件没有被改动，刷新页面即可恢复。如果这次是你有意为之，可在「聊天快照」里放行。',
+        settings.autoRestore ? '文件没有被改动，正在恢复聊天…' : '文件没有被改动，刷新页面即可恢复。如果这次是你有意为之，可在「扩展 → 聊天保护」里放行。',
         `聊天保护：已拦下异常保存（${b.e} → ${b.n} 楼）`,
         { timeOut: 6000 },
       );
@@ -348,7 +348,7 @@
           notify.warning(`聊天只有 ${n} 楼，记录是 ${e} 楼，正在从快照自动恢复…`, '聊天保护');
           await restore(latest, { silent: true });
         } else {
-          notify.warning(`聊天只有 ${n} 楼，记录是 ${e} 楼。点「${BUTTON}」可以一键恢复。`, '聊天保护', { timeOut: 10000 });
+          notify.warning(`聊天只有 ${n} 楼，记录是 ${e} 楼。去「扩展 → 聊天保护」可以一键恢复。`, '聊天保护', { timeOut: 10000 });
         }
       }
       return;
@@ -534,8 +534,45 @@
 
   eventOn(tavern_events.CHAT_CHANGED, () => setTimeout(onChatChanged, 0));
   eventOn(tavern_events.MESSAGE_DELETED, onMessageDeleted);
-  appendInexistentScriptButtons([{ name: BUTTON, visible: true }]);
-  eventOn(getButtonEvent(BUTTON), openPanel);
+  // 入口放在「扩展」面板里正则设置的下面，不占 QR 按钮
+  try {
+    replaceScriptButtons([]);
+  } catch {
+    /* ignore */
+  }
+  const ENTRY_ID = 'chat_guard_settings';
+  function mountEntry() {
+    const doc = P.document;
+    if (doc.getElementById(ENTRY_ID)) return true;
+    const regex = doc.querySelector('.regex_settings');
+    if (!regex) return false;
+    const box = doc.createElement('div');
+    box.id = ENTRY_ID;
+    box.innerHTML = `
+      <div class="inline-drawer">
+        <div class="inline-drawer-toggle inline-drawer-header">
+          <b>聊天保护</b>
+          <div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div>
+        </div>
+        <div class="inline-drawer-content">
+          <div class="menu_button menu_button_icon" style="width:fit-content">
+            <i class="fa-solid fa-shield-halved"></i><span>${BUTTON}</span>
+          </div>
+        </div>
+      </div>`;
+    box.querySelector('.menu_button').addEventListener('click', () => openPanel());
+    regex.after(box);
+    return true;
+  }
+  let mountTries = 0;
+  const mountTimer = setInterval(() => {
+    if (mountEntry() || ++mountTries > 60) clearInterval(mountTimer);
+  }, 500);
+  mountEntry();
+  $(window).on('pagehide', () => {
+    clearInterval(mountTimer);
+    P.document.getElementById(ENTRY_ID)?.remove();
+  });
 
   onChatChanged();
   console.info('[聊天保护] 已启用');
