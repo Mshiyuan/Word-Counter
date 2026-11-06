@@ -16,6 +16,7 @@
 
   const DEFAULTS = {
     autoRestore: true, // true: 挡下后自动恢复聊天; false: 只提示
+    snapshots: true, // 是否保存快照
     historyLimit: 3, // 每个聊天保留的历史版本数
     dropThreshold: 3, // 未授权地一次少了 >= 这么多楼就拦截
     totalCapMB: 50, // 快照总占用上限
@@ -238,6 +239,9 @@
   let pendingDelete = null; // { key, count, ts }
   let lastBlocked = null; // { key, path, init, e, n, ts }
   let autoReloads = { ts: 0, count: 0 };
+  let selfReloadUntil = 0; // 在这之前的坏保存是我们自己重新载入造成的
+  let lastChatChangedTs = 0;
+  let restoringId = null;
 
   // ---------- 拦截保存 ----------
   async function readBody(init) {
@@ -274,6 +278,7 @@
     // 放行：更新记录和快照
     setExpected(key, n);
     prevFp.set(key, fp.list);
+    if (!settings.snapshots) return false;
     let reason = null;
     if (prev) {
       if (prev.length - n >= settings.dropThreshold) reason = '删楼前';
@@ -298,6 +303,11 @@
 
   function onBlocked(b) {
     const now = Date.now();
+    if (now < selfReloadUntil) {
+      // 是我们自己在重新载入聊天，载入途中的空保存直接挡掉，不打扰
+      console.info('[聊天保护] 载入途中的空保存已挡下');
+      return;
+    }
     const repeat = lastBlocked && lastBlocked.key === b.key && now - lastBlocked.ts < 5000;
     lastBlocked = { ...b, ts: now };
     requestRender();
@@ -309,17 +319,19 @@
         { timeOut: 6000 },
       );
     }
-    if (settings.autoRestore) setTimeout(() => maybeAutoReload(b.key), 1500);
+    if (settings.autoRestore) setTimeout(() => maybeAutoReload(b.key, now), 1500);
   }
 
-  async function maybeAutoReload(key) {
+  async function maybeAutoReload(key, blockTs) {
     if (currentKey() !== key) return;
+    if (lastChatChangedTs > blockTs) return; // 酒馆自己已经载入完了
     const e = expected[key];
     if (!isBadDrop(e, ctx().chat.length)) return; // ST 自己已经重新读回来了
     const now = Date.now();
     if (now - autoReloads.ts > 60000) autoReloads = { ts: now, count: 0 };
     if (autoReloads.count >= 3) return;
     autoReloads.count++;
+    selfReloadUntil = Date.now() + 15000;
     await ctx().reloadCurrentChat();
   }
 
@@ -337,6 +349,8 @@
 
   // ---------- 聊天载入 ----------
   async function onChatChanged() {
+    lastChatChangedTs = Date.now();
+    selfReloadUntil = Math.min(selfReloadUntil, Date.now() + 1000);
     requestRender();
     const key = currentKey();
     if (!key) return;
@@ -346,7 +360,7 @@
 
     if (isBadDrop(e, n)) {
       // 硬盘上的文件可能已经被写坏了
-      const latest = await get(key + '|L');
+      const latest = settings.snapshots ? await get(key + '|L') : null;
       if (latest && latest.n > n) {
         if (settings.autoRestore) {
           notify.warning(`聊天只有 ${n} 楼，记录是 ${e} 楼，正在从快照自动恢复…`, '聊天保护');
@@ -364,7 +378,7 @@
 
     idle(() =>
       enqueue(async () => {
-        if (currentKey() !== key || ctx().chat.length !== n) return;
+        if (!settings.snapshots || currentKey() !== key || ctx().chat.length !== n) return;
         const latest = await get(key + '|L');
         if (!latest || latest.sig !== fp.sig) {
           // 快照和打开时的样子不一致（或还没有快照）：先补一份最新完好版
@@ -388,30 +402,39 @@
 
   // ---------- 恢复 ----------
   async function restore(rec, { silent = false } = {}) {
-    const text = await gunzip(rec.blob);
-    const data = JSON.parse(text);
-    data.force = true;
-    await enqueue(async () => {
-      await flushPending();
-      await rotateToHistory(rec.key, '恢复前');
-    });
-    const res = await origFetch.call(P, rec.url, {
-      method: 'POST',
-      cache: 'no-cache',
-      headers: ctx().getRequestHeaders(),
-      body: JSON.stringify(data),
-    });
-    if (!res.ok) {
-      notify.error('恢复失败：' + res.status, '聊天保护');
-      return false;
-    }
-    const msgs = data.chat.slice(1);
-    setExpected(rec.key, msgs.length);
-    prevFp.set(rec.key, fingerprints(msgs).list);
-    if (rec.key === currentKey()) await ctx().reloadCurrentChat();
+    if (restoringId) return false;
+    restoringId = rec.id;
     requestRender();
-    notify.success(`已恢复到 ${fmtTime(rec.ts)} 的版本（${rec.n} 楼）`, silent ? '聊天保护：自动恢复' : '聊天保护');
-    return true;
+    if (!silent) notify.info('正在恢复…', '聊天保护', { timeOut: 1500 });
+    try {
+      // 先把现在的最新完好版留进历史（后台进行，不耽误恢复）
+      if (settings.snapshots) enqueue(() => rotateToHistory(rec.key, '恢复前'));
+      // 直接用存好的原文写回，不再整份解析/重新序列化，大聊天也不卡
+      let text = await gunzip(rec.blob);
+      if (/"force":(true|false)/.test(text)) text = text.replace(/"force":(true|false)/, '"force":true');
+      else text = '{"force":true,' + text.slice(1);
+      const res = await origFetch.call(P, rec.url, {
+        method: 'POST',
+        cache: 'no-cache',
+        headers: ctx().getRequestHeaders(),
+        body: text,
+      });
+      if (!res.ok) {
+        notify.error('恢复失败：' + res.status, '聊天保护');
+        return false;
+      }
+      setExpected(rec.key, rec.n);
+      prevFp.delete(rec.key);
+      if (rec.key === currentKey()) {
+        selfReloadUntil = Date.now() + 15000;
+        await ctx().reloadCurrentChat();
+      }
+      notify.success(`已恢复到 ${fmtTime(rec.ts)} 的版本（${rec.n} 楼）`, silent ? '聊天保护：自动恢复' : '聊天保护');
+      return true;
+    } finally {
+      restoringId = null;
+      requestRender();
+    }
   }
 
   // ---------- 面板（直接放在「扩展」里正则下面的下拉框中） ----------
@@ -427,6 +450,7 @@
       --cg-c1: rgba(127,127,127,.08); --cg-c2: rgba(127,127,127,.14); --cg-c3: rgba(127,127,127,.22);
       --cg-muted: rgba(127,127,127,.95); --cg-line: rgba(127,127,127,.55);
       --cg-shadow: var(--SmartThemeShadowColor, rgba(0,0,0,.15));
+      --cg-spring: cubic-bezier(0.16, 1, 0.3, 1);
       display:flex;flex-direction:column;gap:8px;padding:6px 0 4px;color:var(--cg-fg);text-align:left;
     }
     @supports (color: color-mix(in srgb, red 50%, blue)) {
@@ -438,7 +462,26 @@
         --cg-line: color-mix(in srgb, var(--cg-fg) 55%, transparent);
       }
     }
+    @supports (animation-timing-function: linear(0, 1)) {
+      #${ENTRY_ID} .cg{ --cg-spring: linear(0, 0.038, 0.119, 0.226, 0.355, 0.475, 0.588, 0.699, 0.786, 0.859, 0.922, 0.967, 0.999, 1.024, 1.038, 1.045, 1.048, 1.047, 1.043, 1.038, 1.032, 1.026, 1.02, 1.015, 1.011, 1.007, 1.004, 1.002, 1, 0.999, 0.998, 0.998, 0.998, 0.998, 0.998, 0.998, 0.998, 0.999, 0.999, 0.999, 1); }
+    }
     #${ENTRY_ID} .cg *{box-sizing:border-box}
+    @keyframes cg-pop{from{opacity:0;transform:translateY(28px) scale(.94)}to{opacity:1;transform:none}}
+    #${ENTRY_ID} .cg-pop{animation:cg-pop 820ms var(--cg-spring) both}
+    #${ENTRY_ID} .cg-leave{opacity:0 !important;transform:translateY(8px) scale(.98) !important;
+      transition:opacity 220ms cubic-bezier(.4,0,1,1), transform 220ms cubic-bezier(.4,0,1,1) !important}
+    #${ENTRY_ID} .cg-switch{position:relative;flex-shrink:0;width:36px;height:21px;border-radius:999px;background:var(--cg-c3);cursor:pointer;
+      transition:background .25s ease}
+    #${ENTRY_ID} .cg-switch i{position:absolute;top:2.5px;left:2.5px;width:16px;height:16px;border-radius:50%;
+      background:var(--SmartThemeBlurTintColor, #fff);box-shadow:0 1px 3px var(--cg-shadow);transition:transform 600ms var(--cg-spring)}
+    #${ENTRY_ID} .cg-switch.cg-on{background:var(--cg-line)}
+    #${ENTRY_ID} .cg-switch.cg-on i{transform:translateX(15px)}
+    #${ENTRY_ID} .cg-sec-r{display:flex;align-items:center;gap:8px}
+    #${ENTRY_ID} .cg-alert{touch-action:pan-y;user-select:none;will-change:transform}
+    #${ENTRY_ID} .cg-x{flex-shrink:0;color:var(--cg-muted);font-size:.8em;padding:3px 5px;border-radius:8px;cursor:pointer}
+    #${ENTRY_ID} .cg-x:hover{color:var(--cg-fg);background:var(--cg-c2)}
+    #${ENTRY_ID} .cg-busy{opacity:.55;pointer-events:none}
+    #${ENTRY_ID} .cg-off{color:var(--cg-muted);font-size:.8em;padding:0 2px}
     #${ENTRY_ID} .cg-card{background:var(--cg-c1);border-radius:12px;padding:9px 12px;border:1.5px solid transparent;
       transition:background .2s ease, border-color .2s ease, transform .18s cubic-bezier(.34,1.56,.64,1)}
     #${ENTRY_ID} .cg-hero{display:flex;align-items:center;gap:10px}
@@ -477,12 +520,17 @@
     #${ENTRY_ID} .cg-seg-i.cg-on{color:var(--cg-fg);font-weight:700;background:var(--SmartThemeBlurTintColor, var(--cg-c3));box-shadow:0 1px 3px var(--cg-shadow)}
   `;
   let renderTimer = null;
+  let snapAnim = false;
+  let alertShownTs = 0;
   function panelBody() {
     return P.document.querySelector('#' + ENTRY_ID + ' .cg-body');
   }
   function requestRender() {
     clearTimeout(renderTimer);
-    renderTimer = setTimeout(() => render().catch(e => console.warn('[聊天保护] 面板刷新失败', e)), 300);
+    renderTimer = setTimeout(() => {
+      if (dragging) return requestRender();
+      render().catch(e => console.warn('[聊天保护] 面板刷新失败', e));
+    }, 300);
   }
 
   async function render() {
@@ -495,11 +543,15 @@
     const latest = recs.find(r => r.kind === 'L');
     const hist = recs.filter(r => r.kind === 'H' && (!latest || r.sig !== latest.sig)).sort((x, y) => y.ts - x.ts);
 
-    const card = (r, isLatest) => `
-      <div class="cg-card cg-snap ${isLatest ? 'cg-on' : ''}" data-act="restore" data-id="${esc(r.id)}">
+    const anim = snapAnim;
+    snapAnim = false;
+    const pop = () => (anim ? 'cg-pop' : '');
+    const delay = i => (anim ? `animation-delay:${i * 45}ms` : '');
+    const card = (r, isLatest, i = 0) => `
+      <div class="${pop(i)} cg-card cg-snap ${isLatest ? 'cg-on' : ''} ${restoringId ? 'cg-busy' : ''}" style="${delay(i)}" data-act="restore" data-id="${esc(r.id)}">
         ${isLatest ? '<i class="fa-solid fa-check cg-check"></i>' : ''}
         <div class="cg-t">${isLatest ? '最新完好版' : esc(r.reason || '历史版本')}</div>
-        <div class="cg-sub">${fmtShort(r.ts)}${isLatest ? ' · 推荐恢复' : ''}</div>
+        <div class="cg-sub">${restoringId === r.id ? '恢复中…' : fmtShort(r.ts) + (isLatest ? ' · 推荐恢复' : '')}</div>
         <div class="cg-tags">
           <span class="cg-tag">${r.n} 楼</span><span class="cg-tag">${fmtSize(r.size)}</span>
           ${isLatest ? '' : `<i class="fa-solid fa-trash-can cg-trash" data-act="del" data-id="${esc(r.id)}" title="删除"></i>`}
@@ -522,24 +574,40 @@
         </div>
         ${key ? `<span class="cg-pill">${n} 楼</span>` : ''}
       </div>`;
+    const alertNew = blocked && lastBlocked.ts !== alertShownTs;
+    if (blocked) alertShownTs = lastBlocked.ts;
     const alert = blocked
-      ? `<div class="cg-card cg-hero" style="border-color:var(--cg-line)">
+      ? `<div class="cg-card cg-hero cg-alert ${alertNew ? 'cg-pop' : ''}" style="border-color:var(--cg-line)">
            <div class="cg-grow">
              <div class="cg-t">挡下了一次坏保存</div>
-             <div class="cg-sub">${fmtShort(lastBlocked.ts)} · ${lastBlocked.e} 楼 → ${lastBlocked.n} 楼 · 文件没被改动</div>
+             <div class="cg-sub">${fmtShort(lastBlocked.ts)} · ${lastBlocked.e} 楼 → ${lastBlocked.n} 楼 · 文件没被改动 · 右滑关闭</div>
            </div>
            <span class="cg-pill cg-btn" data-act="allow" title="如果这次是你有意删的楼，点这里放行">放行</span>
+           <i class="fa-solid fa-xmark cg-x" data-act="dismiss" title="关闭"></i>
          </div>`
       : '';
+    const cards = [];
+    if (latest) cards.push(card(latest, true, 1));
+    hist.forEach((h, i) => cards.push(card(h, false, i + (latest ? 2 : 1))));
     const snaps = key
       ? `<div class="cg-sec">
            <span class="cg-sec-t">快照</span>
-           <span class="cg-pill cg-btn" data-act="snap"><i class="fa-solid fa-plus"></i>存一份</span>
+           <span class="cg-sec-r">
+             ${settings.snapshots ? `<span class="cg-pill cg-btn cg-snap-part ${pop()}" data-act="snap"><i class="fa-solid fa-plus"></i>存一份</span>` : ''}
+             <span class="cg-switch ${settings.snapshots ? 'cg-on' : ''}" data-act="toggle-snap" title="保存快照"><i></i></span>
+           </span>
          </div>
-         <div class="cg-grid">
-           ${latest ? card(latest, true) : '<div class="cg-card cg-empty">还没有快照，正常保存一次后会自动生成</div>'}
-           ${hist.map(h => card(h, false)).join('')}
-         </div>`
+         ${
+           settings.snapshots
+             ? `<div class="cg-grid cg-snap-part">
+                  ${
+                    cards.length
+                      ? cards.join('')
+                      : `<div class="cg-card cg-empty ${pop()}" style="${delay(1)}">还没有快照，正常保存一次后会自动生成</div>`
+                  }
+                </div>`
+             : '<div class="cg-off">快照已关闭，不再保存新快照（已有的会保留）。拦截坏保存不受影响。</div>'
+         }`
       : '';
     const limits = [1, 3, 5, 10];
     if (!limits.includes(settings.historyLimit)) limits.push(settings.historyLimit), limits.sort((x, y) => x - y);
@@ -558,12 +626,99 @@
         </div>
       </div>`;
     body.innerHTML = `<div class="cg">${hero}${alert}${snaps}${prefs}</div>`;
+    const al = body.querySelector('.cg-alert');
+    if (al) bindSwipe(al);
+  }
+
+  // 提示卡右滑关闭
+  let dragging = false;
+  let suppressClick = false;
+  function dismissAlert(el) {
+    const h = el.offsetHeight;
+    el.style.transition = 'transform 220ms cubic-bezier(.4,0,1,1), opacity 220ms cubic-bezier(.4,0,1,1)';
+    el.style.transform = 'translateX(110%)';
+    el.style.opacity = '0';
+    setTimeout(() => {
+      el.style.transition = 'height 200ms cubic-bezier(.4,0,.2,1), margin 200ms, padding 200ms';
+      el.style.height = h + 'px';
+      el.style.overflow = 'hidden';
+      requestAnimationFrame(() => {
+        el.style.height = '0px';
+        el.style.paddingTop = el.style.paddingBottom = '0px';
+        el.style.marginTop = '-8px';
+        el.style.borderWidth = '0';
+      });
+      setTimeout(() => {
+        lastBlocked = null;
+        render();
+      }, 210);
+    }, 220);
+  }
+  function bindSwipe(el) {
+    let x0 = 0, y0 = 0, dx = 0, active = false, horiz = null;
+    el.addEventListener('pointerdown', ev => {
+      if (ev.button > 0) return;
+      active = true; horiz = null; dx = 0; x0 = ev.clientX; y0 = ev.clientY;
+    });
+    el.addEventListener('pointermove', ev => {
+      if (!active) return;
+      const mx = ev.clientX - x0, my = ev.clientY - y0;
+      if (horiz === null && Math.abs(mx) + Math.abs(my) > 6) horiz = Math.abs(mx) > Math.abs(my);
+      if (!horiz) return;
+      if (!dragging) { dragging = true; try { el.setPointerCapture(ev.pointerId); } catch { /* ignore */ } }
+      dx = Math.max(0, mx);
+      el.style.transition = 'none';
+      el.style.transform = `translateX(${dx}px)`;
+      el.style.opacity = String(1 - Math.min(0.8, dx / el.offsetWidth));
+    });
+    const end = () => {
+      if (!active) return;
+      active = false;
+      if (!dragging) return;
+      dragging = false;
+      suppressClick = true;
+      setTimeout(() => (suppressClick = false), 50);
+      if (dx > el.offsetWidth * 0.35) dismissAlert(el);
+      else {
+        el.style.transition = 'transform 600ms var(--cg-spring), opacity 300ms ease';
+        el.style.transform = '';
+        el.style.opacity = '';
+      }
+    };
+    el.addEventListener('pointerup', end);
+    el.addEventListener('pointercancel', end);
   }
 
   async function onPanelClick(ev) {
+    if (suppressClick) return;
     const btn = ev.target.closest('[data-act]');
     if (!btn) return;
     const act = btn.dataset.act;
+    if (restoringId && act !== 'set') return;
+    if (act === 'toggle-snap') {
+      const on = !settings.snapshots;
+      btn.classList.toggle('cg-on', on);
+      if (on) {
+        settings.snapshots = true;
+        saveSettings();
+        snapAnim = true;
+        render();
+        onChatChanged();
+      } else {
+        panelBody()?.querySelectorAll('.cg-snap-part').forEach(x => x.classList.add('cg-leave'));
+        settings.snapshots = false;
+        saveSettings();
+        clearTimeout(pendingTimer);
+        pending = null;
+        setTimeout(render, 230);
+      }
+      return;
+    }
+    if (act === 'dismiss') {
+      const el = btn.closest('.cg-alert');
+      if (el) dismissAlert(el);
+      return;
+    }
     const id = btn.dataset.id;
     const key = currentKey();
     if (act === 'set') {
@@ -682,7 +837,16 @@
     box.prepend(style);
     box.querySelector('.cg-body').addEventListener('click', onPanelClick);
     box.querySelector('.cg-body').addEventListener('change', onPanelChange);
-    box.querySelector('.inline-drawer-toggle').addEventListener('click', () => setTimeout(requestRender, 50));
+    box.querySelector('.cg-body').addEventListener('animationend', ev => {
+      ev.target.classList.remove('cg-pop');
+      ev.target.style.animationDelay = '';
+    });
+    box.querySelector('.inline-drawer-toggle').addEventListener('click', () =>
+      setTimeout(() => {
+        snapAnim = true;
+        render().catch(() => {});
+      }, 30),
+    );
     regex.after(box);
     return true;
   }
