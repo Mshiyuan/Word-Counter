@@ -420,36 +420,61 @@
     const hm = d.toTimeString().slice(0, 5);
     return d.toDateString() === new Date().toDateString() ? '今天 ' + hm : `${d.getMonth() + 1}/${d.getDate()} ${hm}`;
   };
+  // 颜色全部取自酒馆主题变量，跟随美化变化
   const PANEL_CSS = `
-    #${ENTRY_ID} .cg{display:flex;flex-direction:column;gap:10px;text-align:left;padding:6px 0 4px}
-    #${ENTRY_ID} .cg-card{border-radius:12px;padding:12px;background:rgba(127,127,127,.08);border:1px solid rgba(127,127,127,.16)}
-    #${ENTRY_ID} .cg-status{display:flex;gap:12px;align-items:center}
-    #${ENTRY_ID} .cg-ok{background:rgba(76,175,80,.12);border-color:rgba(76,175,80,.32)}
-    #${ENTRY_ID} .cg-warn{background:rgba(230,160,40,.15);border-color:rgba(230,160,40,.4)}
-    #${ENTRY_ID} .cg-icon{flex-shrink:0;width:40px;height:40px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:18px;color:#fff;background:#4caf50}
-    #${ENTRY_ID} .cg-warn .cg-icon{background:#e6a028}
-    #${ENTRY_ID} .cg-main{flex:1;min-width:0}
-    #${ENTRY_ID} .cg-h{font-weight:bold;font-size:1.05em;line-height:1.35}
-    #${ENTRY_ID} .cg-sub{opacity:.7;font-size:.85em;line-height:1.45;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-    #${ENTRY_ID} .cg-title{display:flex;align-items:center;gap:7px;font-weight:bold;margin-bottom:10px}
-    #${ENTRY_ID} .cg-title i{opacity:.7}
-    #${ENTRY_ID} .cg-item{display:flex;align-items:center;gap:8px;padding:9px 10px;border-radius:9px;background:rgba(127,127,127,.08)}
-    #${ENTRY_ID} .cg-item + .cg-item{margin-top:6px}
-    #${ENTRY_ID} .cg-latest{background:rgba(76,175,80,.13);box-shadow:inset 3px 0 0 #4caf50}
-    #${ENTRY_ID} .cg-badge{display:inline-block;font-size:.72em;font-weight:normal;padding:1px 7px;border-radius:8px;background:#4caf50;color:#fff;margin-left:6px;vertical-align:middle}
-    #${ENTRY_ID} .cg-btn{flex-shrink:0;white-space:nowrap;cursor:pointer;padding:4px 13px;border-radius:999px;font-size:.85em;border:1px solid rgba(127,127,127,.38);user-select:none;line-height:1.5}
-    #${ENTRY_ID} .cg-btn:hover{background:rgba(127,127,127,.15)}
-    #${ENTRY_ID} .cg-primary{background:#4caf50;border-color:#4caf50;color:#fff}
-    #${ENTRY_ID} .cg-primary:hover{background:#43a047}
-    #${ENTRY_ID} .cg-amber{background:#e6a028;border-color:#e6a028;color:#fff}
-    #${ENTRY_ID} .cg-del{padding:4px 9px;color:#d9534f;border-color:rgba(217,83,79,.4)}
-    #${ENTRY_ID} .cg-add{margin-top:10px;text-align:center;padding:8px;border-radius:9px;border:1px dashed rgba(127,127,127,.5);cursor:pointer;font-size:.9em;opacity:.85}
-    #${ENTRY_ID} .cg-add:hover{opacity:1;background:rgba(127,127,127,.08)}
-    #${ENTRY_ID} .cg-row{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:7px 0}
-    #${ENTRY_ID} .cg-row + .cg-row{border-top:1px solid rgba(127,127,127,.16)}
-    #${ENTRY_ID} .cg-row select, #${ENTRY_ID} .cg-row input{width:auto !important;min-width:0;margin:0 !important;flex-shrink:0}
-    #${ENTRY_ID} .cg-row input{width:4.5em !important;text-align:center}
-    #${ENTRY_ID} .cg-empty{opacity:.6;font-size:.85em;padding:2px}
+    #${ENTRY_ID} .cg{
+      --cg-fg: var(--SmartThemeBodyColor, #555);
+      --cg-c1: rgba(127,127,127,.08); --cg-c2: rgba(127,127,127,.14); --cg-c3: rgba(127,127,127,.22);
+      --cg-muted: rgba(127,127,127,.95); --cg-line: rgba(127,127,127,.55);
+      --cg-shadow: var(--SmartThemeShadowColor, rgba(0,0,0,.15));
+      display:flex;flex-direction:column;gap:12px;padding:10px 2px 6px;color:var(--cg-fg);text-align:left;
+    }
+    @supports (color: color-mix(in srgb, red 50%, blue)) {
+      #${ENTRY_ID} .cg{
+        --cg-c1: color-mix(in srgb, var(--cg-fg) 6%, transparent);
+        --cg-c2: color-mix(in srgb, var(--cg-fg) 11%, transparent);
+        --cg-c3: color-mix(in srgb, var(--cg-fg) 17%, transparent);
+        --cg-muted: color-mix(in srgb, var(--cg-fg) 62%, transparent);
+        --cg-line: color-mix(in srgb, var(--cg-fg) 55%, transparent);
+      }
+    }
+    #${ENTRY_ID} .cg *{box-sizing:border-box}
+    #${ENTRY_ID} .cg-card{background:var(--cg-c1);border-radius:18px;padding:14px 16px;border:2px solid transparent;
+      transition:background .2s ease, border-color .2s ease, transform .18s cubic-bezier(.34,1.56,.64,1)}
+    #${ENTRY_ID} .cg-hero{display:flex;align-items:center;gap:12px}
+    #${ENTRY_ID} .cg-grow{flex:1;min-width:0}
+    #${ENTRY_ID} .cg-t{font-weight:700;font-size:1.08em;line-height:1.35}
+    #${ENTRY_ID} .cg-sub{color:var(--cg-muted);font-size:.85em;line-height:1.5;margin-top:2px;overflow:hidden;text-overflow:ellipsis}
+    #${ENTRY_ID} .cg-nowrap{white-space:nowrap}
+    #${ENTRY_ID} .cg-pill{flex-shrink:0;white-space:nowrap;border-radius:999px;background:var(--cg-c2);padding:5px 14px;font-size:.88em;
+      display:inline-flex;align-items:center;gap:6px;user-select:none}
+    #${ENTRY_ID} .cg-btn{cursor:pointer;transition:background .2s ease, transform .18s cubic-bezier(.34,1.56,.64,1)}
+    #${ENTRY_ID} .cg-btn:hover{background:var(--cg-c3)}
+    #${ENTRY_ID} .cg-btn:active{transform:scale(.94)}
+    #${ENTRY_ID} .cg-sec{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:6px 4px 0}
+    #${ENTRY_ID} .cg-sec-t{color:var(--cg-muted);font-size:.9em}
+    #${ENTRY_ID} .cg-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+    #${ENTRY_ID} .cg-snap{position:relative;cursor:pointer;display:flex;flex-direction:column;min-height:118px;padding:14px}
+    #${ENTRY_ID} .cg-snap:hover{background:var(--cg-c2)}
+    #${ENTRY_ID} .cg-snap:active{transform:scale(.97)}
+    #${ENTRY_ID} .cg-snap.cg-on{border-color:var(--cg-line);background:var(--cg-c2)}
+    #${ENTRY_ID} .cg-snap .cg-t{font-size:1em;padding-right:18px}
+    #${ENTRY_ID} .cg-check{position:absolute;top:14px;right:14px;font-size:.9em}
+    #${ENTRY_ID} .cg-tags{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-top:auto;padding-top:12px}
+    #${ENTRY_ID} .cg-tag{background:var(--cg-c2);border-radius:999px;padding:2px 10px;font-size:.78em;color:var(--cg-muted);white-space:nowrap}
+    #${ENTRY_ID} .cg-trash{margin-left:auto;color:var(--cg-muted);padding:4px 6px;border-radius:8px;cursor:pointer;transition:color .2s, background .2s}
+    #${ENTRY_ID} .cg-trash:hover{color:var(--cg-fg);background:var(--cg-c2)}
+    #${ENTRY_ID} .cg-add{grid-column:1 / -1;display:flex;align-items:center;justify-content:center;gap:6px;min-height:0;padding:12px;
+      background:transparent;border:2px dashed var(--cg-c3);color:var(--cg-muted);cursor:pointer;font-size:.9em}
+    #${ENTRY_ID} .cg-add:hover{color:var(--cg-fg);border-color:var(--cg-line)}
+    #${ENTRY_ID} .cg-empty{grid-column:1 / -1;color:var(--cg-muted);font-size:.88em;text-align:center;padding:18px 10px}
+    #${ENTRY_ID} .cg-opt + .cg-opt{margin-top:16px}
+    #${ENTRY_ID} .cg-opt .cg-sub{margin-bottom:8px}
+    #${ENTRY_ID} .cg-seg{display:flex;gap:4px;padding:4px;border-radius:16px;background:var(--cg-c1)}
+    #${ENTRY_ID} .cg-seg-i{flex:1;text-align:center;white-space:nowrap;padding:8px 6px;border-radius:12px;cursor:pointer;color:var(--cg-muted);
+      transition:background .25s ease, color .25s ease, box-shadow .25s ease, transform .18s cubic-bezier(.34,1.56,.64,1)}
+    #${ENTRY_ID} .cg-seg-i:active{transform:scale(.94)}
+    #${ENTRY_ID} .cg-seg-i.cg-on{color:var(--cg-fg);font-weight:700;background:var(--SmartThemeBlurTintColor, var(--cg-c3));box-shadow:0 1px 6px var(--cg-shadow)}
   `;
   let renderTimer = null;
   function panelBody() {
@@ -470,65 +495,69 @@
     const latest = recs.find(r => r.kind === 'L');
     const hist = recs.filter(r => r.kind === 'H' && (!latest || r.sig !== latest.sig)).sort((x, y) => y.ts - x.ts);
 
-    const item = (r, isLatest) => `
-      <div class="cg-item ${isLatest ? 'cg-latest' : ''}">
-        <div class="cg-main">
-          <div class="cg-h" style="font-size:.95em">${isLatest ? '最新完好版<span class="cg-badge">推荐</span>' : esc(r.reason || '历史版本')}</div>
-          <div class="cg-sub">${fmtShort(r.ts)} · ${r.n} 楼 · ${fmtSize(r.size)}</div>
+    const card = (r, isLatest) => `
+      <div class="cg-card cg-snap ${isLatest ? 'cg-on' : ''}" data-act="restore" data-id="${esc(r.id)}">
+        ${isLatest ? '<i class="fa-solid fa-check cg-check"></i>' : ''}
+        <div class="cg-t">${isLatest ? '最新完好版' : esc(r.reason || '历史版本')}</div>
+        <div class="cg-sub">${fmtShort(r.ts)}${isLatest ? ' · 推荐恢复' : ''}</div>
+        <div class="cg-tags">
+          <span class="cg-tag">${r.n} 楼</span><span class="cg-tag">${fmtSize(r.size)}</span>
+          ${isLatest ? '' : `<i class="fa-solid fa-trash-can cg-trash" data-act="del" data-id="${esc(r.id)}" title="删除"></i>`}
         </div>
-        <div class="cg-btn ${isLatest ? 'cg-primary' : ''}" data-act="restore" data-id="${esc(r.id)}">恢复</div>
-        ${isLatest ? '' : `<div class="cg-btn cg-del" data-act="del" data-id="${esc(r.id)}" title="删除"><i class="fa-solid fa-trash-can"></i></div>`}
       </div>`;
+    const seg = (k, opts, cur) => `
+      <div class="cg-seg">${opts
+        .map(([v, label]) => `<div class="cg-seg-i ${String(v) === String(cur) ? 'cg-on' : ''}" data-act="set" data-k="${k}" data-v="${v}">${label}</div>`)
+        .join('')}</div>`;
 
     const bad = key && isBadDrop(e, n);
     const blocked = lastBlocked && lastBlocked.key === key;
-    const status = !key
-      ? `<div class="cg-card cg-status">
-           <div class="cg-icon" style="background:rgba(127,127,127,.5)"><i class="fa-solid fa-shield-halved"></i></div>
-           <div class="cg-main"><div class="cg-h">待命中</div><div class="cg-sub">打开一个聊天后开始保护</div></div>
-         </div>`
-      : `<div class="cg-card cg-status ${bad ? 'cg-warn' : 'cg-ok'}">
-           <div class="cg-icon"><i class="fa-solid ${bad ? 'fa-triangle-exclamation' : 'fa-shield-halved'}"></i></div>
-           <div class="cg-main">
-             <div class="cg-h">${bad ? '聊天不完整' : '保护中'}</div>
-             <div class="cg-sub">${esc(currentTitle())}</div>
-             <div class="cg-sub">${bad ? `当前 ${n} 楼，记录是 ${e} 楼，可以从下面恢复` : `共 ${n} 楼`}</div>
-           </div>
-         </div>`;
+    const hero = `
+      <div class="cg-card cg-hero">
+        <div class="cg-grow">
+          <div class="cg-t">${!key ? '待命中' : bad ? '聊天不完整' : '保护中'}</div>
+          <div class="cg-sub cg-nowrap">${
+            !key ? '打开一个聊天后开始保护' : bad ? `记录是 ${e} 楼，点下面的快照恢复` : esc(currentTitle())
+          }</div>
+        </div>
+        ${key ? `<span class="cg-pill">${n} 楼</span>` : ''}
+      </div>`;
     const alert = blocked
-      ? `<div class="cg-card cg-status cg-warn">
-           <div class="cg-icon"><i class="fa-solid fa-hand"></i></div>
-           <div class="cg-main">
-             <div class="cg-h">挡下了一次坏保存</div>
+      ? `<div class="cg-card cg-hero" style="border-color:var(--cg-line)">
+           <div class="cg-grow">
+             <div class="cg-t">挡下了一次坏保存</div>
              <div class="cg-sub">${fmtShort(lastBlocked.ts)} · ${lastBlocked.e} 楼 → ${lastBlocked.n} 楼 · 文件没被改动</div>
            </div>
-           <div class="cg-btn cg-amber" data-act="allow" title="如果这次是你有意删的楼，点这里放行">放行</div>
+           <span class="cg-pill cg-btn" data-act="allow" title="如果这次是你有意删的楼，点这里放行">放行</span>
          </div>`
       : '';
     const snaps = key
-      ? `<div class="cg-card">
-           <div class="cg-title"><i class="fa-solid fa-clock-rotate-left"></i>快照</div>
-           ${latest ? item(latest, true) : '<div class="cg-empty">还没有快照，正常保存一次后会自动生成</div>'}
-           ${hist.map(r => item(r, false)).join('')}
-           <div class="cg-add" data-act="snap"><i class="fa-solid fa-plus"></i> 把当前聊天存一份到历史</div>
+      ? `<div class="cg-sec">
+           <span class="cg-sec-t">快照</span>
+           <span class="cg-pill cg-btn" data-act="snap"><i class="fa-solid fa-plus"></i>存一份</span>
+         </div>
+         <div class="cg-grid">
+           ${latest ? card(latest, true) : '<div class="cg-card cg-empty">还没有快照，正常保存一次后会自动生成</div>'}
+           ${hist.map(h => card(h, false)).join('')}
          </div>`
       : '';
+    const limits = [1, 3, 5, 10];
+    if (!limits.includes(settings.historyLimit)) limits.push(settings.historyLimit), limits.sort((x, y) => x - y);
     const prefs = `
+      <div class="cg-sec"><span class="cg-sec-t">设置</span></div>
       <div class="cg-card">
-        <div class="cg-title"><i class="fa-solid fa-sliders"></i>设置</div>
-        <div class="cg-row">
-          <span>挡下坏保存后</span>
-          <select class="text_pole" data-set="autoRestore">
-            <option value="1" ${settings.autoRestore ? 'selected' : ''}>自动恢复聊天</option>
-            <option value="0" ${settings.autoRestore ? '' : 'selected'}>只弹小提示</option>
-          </select>
+        <div class="cg-opt">
+          <div class="cg-t" style="font-size:1em">挡下坏保存后</div>
+          <div class="cg-sub">文件本身不会被改动，只是选怎么让聊天回来</div>
+          ${seg('autoRestore', [[1, '自动恢复'], [0, '只提示']], settings.autoRestore ? 1 : 0)}
         </div>
-        <div class="cg-row">
-          <span>每个聊天保留历史（份）</span>
-          <input type="number" min="0" max="20" class="text_pole" data-set="historyLimit" value="${settings.historyLimit}">
+        <div class="cg-opt">
+          <div class="cg-t" style="font-size:1em">每个聊天保留历史</div>
+          <div class="cg-sub">只在删很多楼、大面积改写、打开聊天时留底</div>
+          ${seg('historyLimit', limits.map(v => [v, v + ' 份']), settings.historyLimit)}
         </div>
       </div>`;
-    body.innerHTML = `<div class="cg">${status}${alert}${snaps}${prefs}</div>`;
+    body.innerHTML = `<div class="cg">${hero}${alert}${snaps}${prefs}</div>`;
   }
 
   async function onPanelClick(ev) {
@@ -537,6 +566,15 @@
     const act = btn.dataset.act;
     const id = btn.dataset.id;
     const key = currentKey();
+    if (act === 'set') {
+      const k = btn.dataset.k;
+      const v = Number(btn.dataset.v);
+      if (k === 'autoRestore') settings.autoRestore = v === 1;
+      else if (k === 'historyLimit') settings.historyLimit = v;
+      saveSettings();
+      btn.parentElement.querySelectorAll('.cg-seg-i').forEach(x => x.classList.toggle('cg-on', x === btn));
+      return;
+    }
     if (act === 'allow') {
       await allowLastBlocked();
     } else if (act === 'del') {
