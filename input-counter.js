@@ -1099,7 +1099,7 @@ $(() => {
               <div class="ic-ctxbar"></div>
               <div class="ic-ctxlist"></div>
             </div>
-            <p class="ic-foot">预设 = 总数减去其他各项，包含格式和拼接用的字符。各项均为估算值；世界书有概率触发的条目时显示为范围。</p>
+            <p class="ic-foot">其他 = 总数减去以上各项，主要是格式、拼接用的字符和插件注入的内容。各项均为估算值；世界书有概率触发的条目时显示为范围。</p>
           </div>
 
           <div class="ic-section">
@@ -1628,15 +1628,35 @@ $(() => {
   }
 
   // ---------- 上下文构成（设置浮窗最上面）----------
-  // 世界书、角色卡、用户人设、聊天记录各自取原文算；预设 = 总数 − 其他各项（所以预设里含格式、拼接用的字符）。
-  // 只算真正出现在这次上下文里的部分：在拼好的上下文全文里能找到开头那一段才算。
+  // 预设、角色卡、用户人设、世界书、聊天记录各自取原文算；其他 = 总数 − 以上各项（格式、拼接用的字符、插件注入等）。
+  // 只算真正出现在这次上下文里的部分：在拼好的上下文全文里能找到开头那一段才算（预设里关掉的条目自然不算）。
   const BREAKDOWN_PARTS = [
     ['preset', '预设', '#9AA5B8'],
     ['card', '角色卡', '#E3A1A1'],
     ['persona', '用户人设', '#E8C38C'],
     ['wi', '世界书', '#9FC69A'],
     ['chat', '聊天记录', '#9CB3DD'],
+    ['other', '其他', '#C7C0B4'],
   ];
+
+  // 预设里写的内容：聊天补全是预设条目（不含"角色描述""聊天记录"这类占位条目）和几个提示词字段；文本补全是系统提示词
+  function presetTexts(ctx) {
+    const sub = (t) => { try { return typeof ctx.substituteParams === 'function' ? ctx.substituteParams(t) : t; } catch (e) { return t; } };
+    const out = [];
+    if (ctx.mainApi === 'openai' || !ctx.mainApi) {
+      const oai = ctx.chatCompletionSettings || {};
+      (Array.isArray(oai.prompts) ? oai.prompts : []).forEach((pr) => {
+        if (pr && !pr.marker && typeof pr.content === 'string' && pr.content.trim()) out.push(sub(pr.content));
+      });
+      ['assistant_prefill', 'assistant_impersonation', 'new_chat_prompt', 'new_group_chat_prompt', 'new_example_chat_prompt', 'continue_nudge_prompt', 'group_nudge_prompt']
+        .forEach((k) => { if (typeof oai[k] === 'string' && oai[k].trim()) out.push(sub(oai[k])); });
+    } else {
+      const pu = ctx.powerUserSettings || {};
+      const sys = pu.sysprompt?.content;
+      if (typeof sys === 'string' && sys.trim()) out.push(sub(sys));
+    }
+    return out;
+  }
   let breakdown = null;
   let breakdownSeq = 0;
 
@@ -1666,14 +1686,15 @@ $(() => {
       if (inPrompt(t)) { chatPieces.push(t); miss = 0; } else miss++;
     }
     const chatTok = await countPiecesInBackground(chatPieces);
+    const preset = await countPiecesInBackground([...new Set(presetTexts(ctx).filter(inPrompt))]);
     const chatForWI = chat.map((m) => m.mes).reverse();
     let wiLo = 0, wiHi = 0;
     if (typeof ctx.getWorldInfoPrompt === 'function') {
       wiLo = await countPiecesInBackground(await wiPiecesOnce(chatForWI, ctx, 0.999999));
       wiHi = await countPiecesInBackground(await wiPiecesOnce(chatForWI, ctx, 0));
     }
-    const preset = Math.max(0, ctxBase.min - card - persona - chatTok - Math.min(wiLo, wiHi));
-    return { total: { ...ctxBase }, preset, card, persona, wi: { min: Math.min(wiLo, wiHi), max: Math.max(wiLo, wiHi) }, chat: chatTok };
+    const other = Math.max(0, ctxBase.min - preset - card - persona - chatTok - Math.min(wiLo, wiHi));
+    return { total: { ...ctxBase }, preset, card, persona, wi: { min: Math.min(wiLo, wiHi), max: Math.max(wiLo, wiHi) }, chat: chatTok, other };
   }
 
   async function refreshBreakdown() {
