@@ -103,6 +103,28 @@ $(() => {
 
   // 文本 → token 结果的缓存，同样的内容不重复算
   const tokenCache = new Map();
+
+  // 很多 API 的分词是酒馆后端在算（每段文字发一次请求，后端一次只处理一个）。
+  // 悬浮栏 / 输入框的数字是用户正在看的，优先算；上下文这类后台估算每算一段前都先让路。
+  let userTokPending = 0;
+  const sleep = (ms) => new Promise((res) => setTimeout(res, ms));
+  async function countForUser(text) {
+    userTokPending++;
+    try { return await countTokensCached(text); } finally { userTokPending--; }
+  }
+  async function yieldToUser() {
+    while (userTokPending > 0) await sleep(80);
+  }
+  // 后台估算用：一段一段地算（每段都有缓存，下次只算新增或改动的部分），每段前先给用户的计数让路
+  async function countPiecesInBackground(pieces) {
+    let total = 0;
+    for (const piece of pieces) {
+      if (typeof piece !== 'string' || !piece) continue;
+      await yieldToUser();
+      total += (await countTokensCached(piece)).value;
+    }
+    return total;
+  }
   async function countTokensCached(text) {
     const hit = tokenCache.get(text);
     if (hit) return hit;
@@ -717,7 +739,7 @@ $(() => {
     } else {
       tokEl.classList.add('ic-pending');
       tokenTimer = setTimeout(async () => {
-        const r = await countTokensCached(tokText);
+        const r = await countForUser(tokText);
         if (seq !== tokenSeq) return; // 期间内容又变了，丢弃过期结果
         tokEl.textContent = `Token ${fmtTokens(r)}`;
         tokEl.classList.remove('ic-pending');
@@ -983,6 +1005,7 @@ $(() => {
       while (queue.length && enabled && !isFollow()) {
         const { el, parts } = queue.shift();
         if (!el.isConnected || mesTextOf.get(el) !== parts.tok) continue; // 楼层没了或内容又变了
+        await yieldToUser();
         const r = await countTokensCached(parts.tok);
         if (!el.isConnected || mesTextOf.get(el) !== parts.tok) continue;
         const label = getMesLabel(el);
@@ -1413,7 +1436,7 @@ $(() => {
     const cached = tokenCache.get(text);
     if (cached) { inputTok = cached.value; renderContext(); return; }
     inputTokTimer = setTimeout(async () => {
-      const r = await countTokensCached(text);
+      const r = await countForUser(text);
       if (inputTokText !== text) return;
       inputTok = r.value;
       renderContext();
@@ -1448,20 +1471,20 @@ $(() => {
   let inputWITimer = null;
   let inputWIRunning = false;
 
-  function wiResultText(res) {
-    if (!res) return '';
-    const parts = [res.worldInfoString || ''];
+  function wiResultPieces(res) {
+    if (!res) return [];
+    // worldInfoString 就是 before + after；能分开就分开算（缓存命中率更高），否则用整段
+    const parts = res.worldInfoBefore || res.worldInfoAfter ? [res.worldInfoBefore || '', res.worldInfoAfter || ''] : [res.worldInfoString || ''];
     (res.worldInfoDepth || []).forEach((d) => parts.push(...(d?.entries || [])));
     parts.push(...(res.anBefore || []), ...(res.anAfter || []));
     (res.worldInfoExamples || []).forEach((e) => parts.push(typeof e === 'string' ? e : (e?.content || '')));
     Object.values(res.outletEntries || {}).forEach((arr) => Array.isArray(arr) && parts.push(...arr));
-    return parts.filter((x) => typeof x === 'string' && x).join('\n');
+    return parts.filter((x) => typeof x === 'string' && x);
   }
 
-  async function wiTokensOnce(chatForWI, ctx) {
-    const res = await ctx.getWorldInfoPrompt(chatForWI, Number(ctx.maxContext) || 8192, true);
-    const text = wiResultText(res);
-    return text ? (await countTokens(text)).value : 0;
+  // 扫描时固定随机数；算 Token 放到随机数还原以后
+  async function wiPiecesOnce(chatForWI, ctx, rv) {
+    return withFixedRandom(rv, async () => wiResultPieces(await ctx.getWorldInfoPrompt(chatForWI, Number(ctx.maxContext) || 8192, true)));
   }
 
   async function runInputWI() {
@@ -1477,7 +1500,11 @@ $(() => {
       // 和酒馆一样：不算隐藏（系统）消息，最新的在最前
       const base = ctx.chat.filter((m) => m && !m.is_system && typeof m.mes === 'string').map((m) => m.mes).reverse();
       const withInput = [text, ...base];
-      const extra = async (rv) => withFixedRandom(rv, async () => Math.max(0, (await wiTokensOnce(withInput, ctx)) - (await wiTokensOnce(base, ctx))));
+      const extra = async (rv) => {
+        const withPieces = await wiPiecesOnce(withInput, ctx, rv);
+        const basePieces = await wiPiecesOnce(base, ctx, rv);
+        return Math.max(0, (await countPiecesInBackground(withPieces)) - (await countPiecesInBackground(basePieces)));
+      };
       const lo = await extra(0.999999);
       const hi = await extra(0);
       if ((getTextarea()?.value || '') !== text) return; // 期间又改了，等下一轮
@@ -1524,7 +1551,9 @@ $(() => {
     const text = promptToText(captured.prompt);
     if (!text) return null;
     if (text === lastPromptText) return lastPromptTok;
-    const tok = (await countTokens(text)).value;
+    // 按消息一段一段算：每段有缓存，聊天往下走时只需要算新的那几段，不必每次把整个上下文重新发去分词
+    const pieces = Array.isArray(captured.prompt) ? captured.prompt.map((m) => promptToText([m])) : [text];
+    const tok = await countPiecesInBackground(pieces);
     lastPromptText = text;
     lastPromptTok = tok;
     return tok;
