@@ -458,6 +458,19 @@ $(() => {
       }
       #${SETTINGS_ID} .ic-act:active { background: rgba(127, 127, 127, 0.14); transition-duration: 0ms; }
 
+      /* 上下文构成 */
+      #${SETTINGS_ID} .ic-ctxcard { padding: 12px 14px 10px; display: flex; flex-direction: column; gap: 10px; }
+      #${SETTINGS_ID} .ic-ctxtop { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+      #${SETTINGS_ID} .ic-ctxtotal { font-size: 16px; font-weight: 600; font-variant-numeric: tabular-nums; }
+      #${SETTINGS_ID} .ic-ctxnote { font-size: 12px; opacity: 0.5; }
+      #${SETTINGS_ID} .ic-ctxbar { display: flex; gap: 2px; height: 8px; border-radius: 4px; overflow: hidden; transform-origin: left center; }
+      #${SETTINGS_ID} .ic-ctxbar:empty { display: none; }
+      #${SETTINGS_ID} .ic-ctxbar span { flex-grow: 0; flex-shrink: 1; min-width: 3px; }
+      #${SETTINGS_ID} .ic-ctxlist { display: flex; flex-direction: column; gap: 4px; }
+      #${SETTINGS_ID} .ic-ctxlist:empty { display: none; }
+      #${SETTINGS_ID} .ic-ctxrow { display: grid; grid-template-columns: 10px 1fr auto 40px; align-items: center; gap: 8px; font-size: 13px; font-variant-numeric: tabular-nums; }
+      #${SETTINGS_ID} .ic-ctxrow i { width: 8px; height: 8px; border-radius: 50%; }
+      #${SETTINGS_ID} .ic-ctxrow .ic-pct { text-align: right; opacity: 0.55; }
       /* 进入 / 离开：只用 transform + opacity，弹簧阻尼 */
       #${SETTINGS_ID} .ic-in { animation: ic-spring-in 620ms ${SPRING_SOFT} both; }
       #${SETTINGS_ID} .ic-out { animation: ic-fade-out 160ms cubic-bezier(0.4, 0, 1, 1) both; pointer-events: none; }
@@ -1079,6 +1092,16 @@ $(() => {
         <div class="ic-body">
           <div class="ic-head"><b>计字簿设置</b><button type="button" class="ic-x" aria-label="关闭">✕</button></div>
 
+          <div class="ic-section" data-section="ctx">
+            <div class="ic-label">上下文构成</div>
+            <div class="ic-card ic-ctxcard">
+              <div class="ic-ctxtop"><b class="ic-ctxtotal">计算中…</b><span class="ic-ctxnote">不含输入框</span></div>
+              <div class="ic-ctxbar"></div>
+              <div class="ic-ctxlist"></div>
+            </div>
+            <p class="ic-foot">预设 = 总数减去其他各项，包含格式和拼接用的字符。各项均为估算值；世界书有概率触发的条目时显示为范围。</p>
+          </div>
+
           <div class="ic-section">
             <div class="ic-label">显示方式</div>
             <div class="ic-seg" data-v="perFloor">
@@ -1168,6 +1191,8 @@ $(() => {
         if (key === 'hideNative') { syncNativeHidden(); return; }
         if (key === 'showContext') {
           toggleSection(el.querySelector('[data-row="ctxInput"]'), settings.showContext);
+          toggleSection(el.querySelector('[data-section="ctx"]'), settings.showContext);
+          if (settings.showContext) refreshBreakdown();
           renderContext();
           if (settings.showContext) scheduleContext(0);
           return;
@@ -1295,6 +1320,7 @@ $(() => {
     el.querySelector('[data-row="splitRole"]').hidden = !settings.globalPos;
     el.querySelector('[data-row="userCount"]').hidden = !settings.splitCount;
     el.querySelector('[data-row="ctxInput"]').hidden = !settings.showContext;
+    el.querySelector('[data-section="ctx"]').hidden = !settings.showContext;
     syncRoleLabels();
   }
 
@@ -1326,6 +1352,7 @@ $(() => {
     el.hidden = false;
     void el.offsetWidth;
     el.classList.add('ic-open');
+    if (settings.showContext) { renderBreakdown(breakdown); refreshBreakdown(); }
   }
   function closeSettings() {
     const el = mainDoc.getElementById(SETTINGS_ID);
@@ -1391,6 +1418,8 @@ $(() => {
   // 拼好的上下文很长，算 Token 也不便宜：同样的内容不重复算
   let lastPromptText = null;
   let lastPromptTok = 0;
+  let lastDryText = '';    // 最近一次拼出来的上下文全文
+  let ctxPromptText = '';  // 概率条目都不触发时的上下文全文（上下文构成分析用）
   let ctxBase = null; // { min, max }
   let ctxState = 'idle'; // idle | running | unavailable
   let ctxTimer = null;
@@ -1550,6 +1579,7 @@ $(() => {
     if (!captured) return null;
     const text = promptToText(captured.prompt);
     if (!text) return null;
+    lastDryText = text;
     if (text === lastPromptText) return lastPromptTok;
     // 按消息一段一段算：每段有缓存，聊天往下走时只需要算新的那几段，不必每次把整个上下文重新发去分词
     const pieces = Array.isArray(captured.prompt) ? captured.prompt.map((m) => promptToText([m])) : [text];
@@ -1570,6 +1600,7 @@ $(() => {
     renderContext();
     try {
       const noneProb = await dryRunOnce(0.999999); // 概率条目都不触发
+      const noneText = lastDryText;
       if (noneProb == null) {
         // 没选角色、还没连接等情况拼不出来：保留上一次结果，从没算出来过就先不显示
         if (!ctxBase) ctxState = 'unavailable';
@@ -1578,8 +1609,10 @@ $(() => {
       const allProb = await dryRunOnce(0); // 概率条目都触发
       ctxBase = { min: Math.min(noneProb, allProb ?? noneProb), max: Math.max(noneProb, allProb ?? noneProb) };
       ctxState = 'idle';
+      ctxPromptText = noneText;
       inputWIText = null; // 聊天变了，输入框触发的世界书也要重新扫
       scheduleInputWI(200);
+      if (mainDoc.getElementById(SETTINGS_ID)?.classList.contains('ic-open')) refreshBreakdown();
     } finally {
       ctxRunning = false;
       ctxLastEnd = Date.now();
@@ -1592,6 +1625,103 @@ $(() => {
     if (!enabled || !settings.showContext) return;
     clearTimeout(ctxTimer);
     ctxTimer = setTimeout(runContext, delay);
+  }
+
+  // ---------- 上下文构成（设置浮窗最上面）----------
+  // 世界书、角色卡、用户人设、聊天记录各自取原文算；预设 = 总数 − 其他各项（所以预设里含格式、拼接用的字符）。
+  // 只算真正出现在这次上下文里的部分：在拼好的上下文全文里能找到开头那一段才算。
+  const BREAKDOWN_PARTS = [
+    ['preset', '预设', '#9AA5B8'],
+    ['card', '角色卡', '#E3A1A1'],
+    ['persona', '用户人设', '#E8C38C'],
+    ['wi', '世界书', '#9FC69A'],
+    ['chat', '聊天记录', '#9CB3DD'],
+  ];
+  let breakdown = null;
+  let breakdownSeq = 0;
+
+  async function computeBreakdown() {
+    const ctx = getCtx();
+    const prompt = ctxPromptText;
+    if (!ctx || !ctxBase || !prompt) return null;
+    const inPrompt = (t) => {
+      const x = (t || '').trim();
+      if (!x) return false;
+      return prompt.includes(x.length > 30 ? x.slice(0, 30) : x);
+    };
+    let fields = {};
+    try { fields = ctx.getCharacterCardFields?.() || {}; } catch (e) {}
+    const str = (v) => (Array.isArray(v) ? v.join('\n') : (typeof v === 'string' ? v : ''));
+    const cardPieces = ['description', 'personality', 'scenario', 'mesExamples', 'charDepthPrompt', 'system', 'jailbreak']
+      .map((k) => str(fields[k])).filter(inPrompt);
+    const personaText = str(fields.persona);
+    const card = await countPiecesInBackground(cardPieces);
+    const persona = inPrompt(personaText) ? await countPiecesInBackground([personaText]) : 0;
+    // 聊天记录：从最新往前，能在上下文里找到的才算（太早的会被酒馆截掉）；连续 5 条找不到就停
+    const chat = (Array.isArray(ctx.chat) ? ctx.chat : []).filter((m) => m && !m.is_system && typeof m.mes === 'string');
+    const chatPieces = [];
+    for (let i = chat.length - 1, miss = 0; i >= 0 && miss < 5; i--) {
+      const t = chat[i].mes;
+      if (!t.trim()) continue;
+      if (inPrompt(t)) { chatPieces.push(t); miss = 0; } else miss++;
+    }
+    const chatTok = await countPiecesInBackground(chatPieces);
+    const chatForWI = chat.map((m) => m.mes).reverse();
+    let wiLo = 0, wiHi = 0;
+    if (typeof ctx.getWorldInfoPrompt === 'function') {
+      wiLo = await countPiecesInBackground(await wiPiecesOnce(chatForWI, ctx, 0.999999));
+      wiHi = await countPiecesInBackground(await wiPiecesOnce(chatForWI, ctx, 0));
+    }
+    const preset = Math.max(0, ctxBase.min - card - persona - chatTok - Math.min(wiLo, wiHi));
+    return { total: { ...ctxBase }, preset, card, persona, wi: { min: Math.min(wiLo, wiHi), max: Math.max(wiLo, wiHi) }, chat: chatTok };
+  }
+
+  async function refreshBreakdown() {
+    const sec = mainDoc.getElementById(SETTINGS_ID)?.querySelector('[data-section="ctx"]');
+    if (!sec || !settings.showContext) return;
+    const seq = ++breakdownSeq;
+    if (!breakdown) renderBreakdown(null);
+    try {
+      const b = await computeBreakdown();
+      if (seq !== breakdownSeq) return;
+      const first = !breakdown && b;
+      breakdown = b;
+      renderBreakdown(b, first);
+    } catch (e) {
+      console.warn(`[${SCRIPT_ID}] 上下文构成分析失败`, e);
+    }
+  }
+
+  function renderBreakdown(b, animate = false) {
+    const sec = mainDoc.getElementById(SETTINGS_ID)?.querySelector('[data-section="ctx"]');
+    if (!sec) return;
+    const totalEl = sec.querySelector('.ic-ctxtotal');
+    const bar = sec.querySelector('.ic-ctxbar');
+    const list = sec.querySelector('.ic-ctxlist');
+    if (!b) {
+      totalEl.textContent = ctxState === 'unavailable' ? '暂时无法估算' : '计算中…';
+      bar.innerHTML = '';
+      list.innerHTML = '';
+      return;
+    }
+    const range = (lo, hi) => (lo === hi ? fmtK(lo) : `${fmtK(lo)}～${fmtK(hi)}`);
+    totalEl.textContent = `上下文 ${range(b.total.min, b.total.max)}`;
+    const mid = (v) => (typeof v === 'number' ? v : (v.min + v.max) / 2);
+    const sum = BREAKDOWN_PARTS.reduce((acc, [k]) => acc + mid(b[k]), 0) || 1;
+    bar.innerHTML = BREAKDOWN_PARTS.map(([k, , color]) => {
+      const pct = (mid(b[k]) / sum) * 100;
+      return pct > 0 ? `<span style="flex-basis:${pct}%;background:${color}"></span>` : '';
+    }).join('');
+    list.innerHTML = BREAKDOWN_PARTS.map(([k, name, color]) => {
+      const v = b[k];
+      const val = typeof v === 'number' ? fmtK(v) : range(v.min, v.max);
+      const pct = Math.round((mid(v) / sum) * 100);
+      return `<div class="ic-ctxrow"><i style="background:${color}"></i><span>${name}</span><span class="ic-num">${val}</span><span class="ic-pct">${pct}%</span></div>`;
+    }).join('');
+    if (animate) {
+      bar.animate([{ transform: 'scaleX(0)' }, { transform: 'none' }], { duration: 720, easing: SPRING_SOFT });
+      list.animate([{ opacity: 0, transform: 'translateY(-6px)' }, { opacity: 1, transform: 'none' }], { duration: 400, easing: 'ease-out' });
+    }
   }
 
   // 什么时候重算底数
